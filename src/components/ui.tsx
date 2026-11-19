@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import {
   useEffect,
   useRef,
@@ -47,7 +48,7 @@ export function Badge({
       ? "red"
       : /未匹配|待|即将|部分|更新/.test(text)
         ? "amber"
-        : /完成|一致|生效|成功|登记/.test(text) && !/免登记/.test(text)
+        : /完成|一致|生效|成功|登记|已发布/.test(text) && !/免登记/.test(text)
           ? "green"
           : /处理中|打标中/.test(text)
             ? "blue"
@@ -135,12 +136,16 @@ export function Dialog({
   children,
   footer,
   wide = false,
+  drawer = false,
+  portal = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  drawer?: boolean;
+  portal?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -151,6 +156,10 @@ export function Dialog({
     document.body.style.overflow = "hidden";
     ref.current?.focus();
     const keyboard = (e: KeyboardEvent) => {
+      if (
+        [...document.querySelectorAll('[role="dialog"]')].at(-1) !== ref.current
+      )
+        return;
       if (e.key === "Escape") closeRef.current();
       if (e.key === "Tab") {
         const elements = Array.from(
@@ -173,12 +182,12 @@ export function Dialog({
     return () => {
       document.body.style.overflow = old;
       document.removeEventListener("keydown", keyboard);
-      previous?.focus();
+      previous?.focus({ preventScroll: true });
     };
   }, []);
-  return (
+  const dialog = (
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop ${drawer ? "drawer-backdrop" : ""}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -186,7 +195,7 @@ export function Dialog({
       <div
         ref={ref}
         tabIndex={-1}
-        className={`dialog ${wide ? "dialog-wide" : ""}`}
+        className={`dialog ${wide ? "dialog-wide" : ""} ${drawer ? "dialog-drawer" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -202,7 +211,9 @@ export function Dialog({
       </div>
     </div>
   );
+  return portal ? createPortal(dialog, document.body) : dialog;
 }
+
 export function Tabs({
   items,
   value,

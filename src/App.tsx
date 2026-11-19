@@ -7,12 +7,15 @@ import { Button, Empty } from "./components/ui";
 import { go } from "./model";
 const UploadWizard = lazy(() => import("./pages/UploadWizard"));
 const ContentDetail = lazy(() => import("./pages/ContentDetail"));
-const Credentials = lazy(() => import("./pages/Credentials"));
 const Collection = lazy(() => import("./pages/Collection"));
 const Tags = lazy(() => import("./pages/Tags"));
 const Administration = lazy(() => import("./pages/Administration"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Login = lazy(() => import("./pages/Login"));
+const Publishing = lazy(() => import("./pages/Publishing"));
+const PublicationPreview = lazy(() =>
+  import("./pages/Publishing").then((m) => ({ default: m.PublicationPreview })),
+);
 export default function App() {
   const { user, role } = useCMS();
   const [hash, setHash] = useState(location.hash || "#/workbench");
@@ -55,19 +58,30 @@ export default function App() {
         <Login />
       </Suspense>
     );
-  const menu = route === "upload" || route === "content" ? "library" : route;
+  const menu =
+    route === "upload" || route === "content"
+      ? "library"
+      : route === "publication-preview"
+        ? "publishing"
+        : route;
   const allowed = route === "tasks" || role?.menus.includes(menu);
   let content;
   if (!allowed)
     content = (
       <Empty
         title="没有此页面的访问权限"
-        description="请联系管理员确认菜单与数据授权。"
+        description="请联系管理员确认当前角色的菜单权限。"
         action={<Button onClick={() => go("workbench")}>返回工作台</Button>}
       />
     );
   else
     switch (route) {
+      case "publishing":
+        content = <Publishing />;
+        break;
+      case "publication-preview":
+        content = <PublicationPreview id={id} />;
+        break;
       case "workbench":
         content = <Workbench />;
         break;
@@ -79,9 +93,6 @@ export default function App() {
         break;
       case "content":
         content = <ContentDetail id={id} />;
-        break;
-      case "credentials":
-        content = <Credentials />;
         break;
       case "collection":
         content = <Collection />;

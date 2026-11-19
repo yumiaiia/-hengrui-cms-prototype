@@ -252,16 +252,7 @@ export default function Credentials() {
     window.addEventListener("hashchange", handler);
     return () => window.removeEventListener("hashchange", handler);
   }, []);
-  const referenced = new Set(
-    assets.flatMap((a) =>
-      a.versions.flatMap((v) =>
-        v.approval.credentialId ? [v.approval.credentialId] : [],
-      ),
-    ),
-  );
-  const credentials = state.credentials.filter(
-    (c) => can("admin") || referenced.has(c.id) || c.createdBy === cms.user?.id,
-  );
+  const credentials = state.credentials;
   const editorVisible =
     !editor?.id || credentials.some((c) => c.id === editor.id);
   const editAllowed = can("edit");
@@ -798,12 +789,10 @@ export default function Credentials() {
             <Badge>{expiryLabel(shownRevision.expiry)}</Badge>
           </div>
           <Tabs
-            items={[...detail.revisions]
-              .reverse()
-              .map((r) => ({
-                key: String(r.revision),
-                label: `R${r.revision}${r.revision === credentialLatest(detail).revision ? " · 最新" : " · 历史"}`,
-              }))}
+            items={[...detail.revisions].reverse().map((r) => ({
+              key: String(r.revision),
+              label: `R${r.revision}${r.revision === credentialLatest(detail).revision ? " · 最新" : " · 历史"}`,
+            }))}
             value={String(shownRevision.revision)}
             onChange={(key) => setRevisionNumber(Number(key))}
           />

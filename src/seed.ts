@@ -1,3 +1,5 @@
+import { convertLegacyTags } from "./migration";
+import { primaryTagId } from "./model";
 import {
   accounts,
   now,
@@ -22,15 +24,6 @@ export const demoCredential: CredentialRevision = {
       id: "e1",
       name: "审批单 · 基本信息",
       url: "/samples/approval-1.svg",
-      number: "APP-DEMO-001",
-      title: "肿瘤学术材料包",
-      expiry: "2027-06-30",
-      status: "一致",
-    },
-    {
-      id: "e2",
-      name: "审批单 · 附件与结论",
-      url: "/samples/approval-2.svg",
       number: "APP-DEMO-001",
       title: "肿瘤学术材料包",
       expiry: "2027-06-30",
@@ -66,7 +59,7 @@ const kinds: Kind[] = [
 ];
 const text = [
   "学术资料概览\n\n本资料为 CMS 交互原型的虚构演示内容，用于验证内容管理、标签校正与审批登记流程，不构成医学建议。\n\n材料覆盖研究背景、证据整理与关键观点，原文件、来源和版本信息均可追溯。",
-  "研究背景与证据整理\n\n研究资料按疾病领域、证据类型和目标受众分类。每个页面可单独查看和校正标签，人工结果在重跑时默认受到保护。\n\n示例材料展示的统计数据仅用于界面演示，不代表真实研究结果。",
+  "研究背景与证据整理\n\n研究资料按疾病领域、证据类型和目标受众分类。每个页面可单独查看和校正标签，人工校正结果会保留。\n\n示例材料展示的统计数据仅用于界面演示，不代表真实研究结果。",
   "关键观点与适用范围\n\n内容归档与解析、自动打标分别管理。审批编号可复用，但不作为内容的唯一编号。\n\n请核对内容版本、审批覆盖范围及有效期，再进行后续使用。",
 ];
 export function makeDemoVersion(i: number): Version {
@@ -134,8 +127,7 @@ export function makeDemoVersion(i: number): Version {
     content: [...text],
     pages: 3,
     createdAt: stamp,
-    process:
-      i === 2 ? "失败" : i === 3 ? "处理中" : i === 4 ? "部分失败" : "完成",
+    process: i === 2 ? "失败" : i === 3 ? "处理中" : i === 4 ? "失败" : "完成",
     tagStatus:
       i === 2 ? "失败" : i === 1 ? "未匹配" : i === 3 ? "待打标" : "已完成",
     tags: [
@@ -178,7 +170,7 @@ export function seedState(): State {
   assets[0].versions[1].changeNote = "补充研究证据与封面";
   assets[0].current = 2;
   return {
-    schema: 1,
+    schema: 2,
     userId: "u1",
     assets,
     credentials: [
@@ -198,7 +190,7 @@ export function seedState(): State {
         createdAt: stamp,
       },
     ],
-    tags: [
+    tags: convertLegacyTags([
       {
         id: "t1",
         name: "瑞普泊肽",
@@ -288,12 +280,16 @@ export function seedState(): State {
         enabled: true,
         external: false,
       },
-    ],
+    ]),
     suggestions: [
       {
         id: "s1",
         name: "指南更新",
-        group: "证据类型",
+        parentId: primaryTagId("证据类型"),
+        contexts: [
+          { assetId: "a2", version: 1 },
+          { assetId: "a3", version: 1 },
+        ],
         mentions: 12,
         assetIds: ["a2", "a3"],
         status: "待处理",
@@ -301,7 +297,11 @@ export function seedState(): State {
       {
         id: "s2",
         name: "长期随访",
-        group: "Key Message",
+        parentId: primaryTagId("Key Message"),
+        contexts: [
+          { assetId: "a1", version: 2 },
+          { assetId: "a7", version: 1 },
+        ],
         mentions: 8,
         assetIds: ["a1", "a7"],
         status: "待处理",
@@ -309,7 +309,8 @@ export function seedState(): State {
       {
         id: "s3",
         name: "临床实践",
-        group: "页面类型",
+        parentId: primaryTagId("页面类型"),
+        contexts: [{ assetId: "a2", version: 1 }],
         mentions: 5,
         assetIds: ["a2"],
         status: "待处理",
@@ -432,10 +433,11 @@ export function seedState(): State {
         permissions: [
           "upload",
           "edit",
+          "publish",
+          "collect",
           "exempt",
           "tags",
           "taxonomy",
-          "rerun",
           "void",
           "export",
           "evidence",
@@ -444,26 +446,46 @@ export function seedState(): State {
         menus: [
           "workbench",
           "library",
+          "publishing",
           "collection",
-          "credentials",
           "tags",
           "admin",
         ],
-        dataRange: "all",
       },
       {
         id: "medical",
         name: "医学部高权限用户",
-        permissions: ["upload", "edit", "exempt", "tags", "export", "evidence"],
-        menus: ["workbench", "library", "collection", "credentials", "tags"],
-        dataRange: "all",
+        permissions: [
+          "upload",
+          "edit",
+          "publish",
+          "collect",
+          "exempt",
+          "tags",
+          "export",
+          "evidence",
+        ],
+        menus: [
+          "workbench",
+          "library",
+          "publishing",
+          "collection",
+          "credentials",
+          "tags",
+        ],
       },
       {
         id: "operator",
         name: "普通用户",
-        permissions: ["upload", "edit", "tags", "export"],
-        menus: ["workbench", "library", "collection", "credentials", "tags"],
-        dataRange: "own",
+        permissions: ["upload", "edit", "publish", "collect", "tags", "export"],
+        menus: [
+          "workbench",
+          "library",
+          "publishing",
+          "collection",
+          "credentials",
+          "tags",
+        ],
       },
     ],
     audits: [
@@ -508,7 +530,7 @@ export function seedState(): State {
         id: "n3",
         title: "审批编号存在 OCR 差异",
         detail: "APP-DEMO-002 已人工确认，原始差异仍保留。",
-        route: "credentials?open=c2",
+        route: "content/a6?tab=approval",
         read: false,
         at: stamp,
         adminOnly: true,

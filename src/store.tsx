@@ -1,3 +1,5 @@
+import { prepareRecommendations } from "./recommendations";
+import { prepareAdministration } from "./administration";
 import {
   createContext,
   useCallback,
@@ -8,8 +10,12 @@ import {
   type ReactNode,
 } from "react";
 import { seedState } from "./seed";
+import { migrateState } from "./migration";
+import { prepareWorkspace } from "./workflow";
+import { availableTag } from "./taxonomy";
 import {
   canRole,
+  primaryTagId,
   current,
   now,
   uid,
@@ -41,20 +47,32 @@ interface API {
   toast: (message: string) => void;
   notify: (notice: Omit<Notice, "id" | "read" | "at">) => void;
   retryTask: (id: string) => void;
-  reprocess: (ids: string[], protect?: boolean) => void;
   addTask: (task: Omit<Task, "id" | "createdAt" | "attempts">) => string;
 }
 const Context = createContext<API | null>(null);
+let loadFailure = "";
 function initial() {
+  loadFailure = "";
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
-      const value = JSON.parse(raw);
-      if (value.schema === 1 && Array.isArray(value.assets))
-        return value as State;
+      const original = JSON.parse(raw);
+      const migrated = prepareRecommendations(
+        prepareAdministration(prepareWorkspace(migrateState(original))),
+      );
+      if (original.schema === 1) {
+        if (!localStorage.getItem(key + "-schema1-backup"))
+          localStorage.setItem(key + "-schema1-backup", raw);
+        localStorage.setItem(key, JSON.stringify(migrated));
+      }
+      return migrated;
     }
-  } catch {}
-  return seedState();
+  } catch (error) {
+    loadFailure = error instanceof Error ? error.message : "原型数据无法读取";
+  }
+  return prepareRecommendations(
+    prepareAdministration(prepareWorkspace(seedState())),
+  );
 }
 export function CMSProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>(initial);
@@ -69,6 +87,7 @@ export function CMSProvider({ children }: { children: ReactNode }) {
   }, [message]);
   const update = useCallback(
     (recipe: (draft: State) => void, log?: Log, permission?: Permission) => {
+      if (loadFailure) return false;
       const before = ref.current;
       const person = before.users.find((u) => u.id === before.userId);
       const role = before.roles.find((r) => r.id === person?.roleId);
@@ -140,7 +159,7 @@ export function CMSProvider({ children }: { children: ReactNode }) {
     if (!t) return;
     if (
       !can(
-        t.type === "标签重跑" ? "rerun" : t.type === "导出" ? "export" : "edit",
+        t.type === "导出" ? "export" : t.type === "采集" ? "collect" : "edit",
       )
     )
       return toast("当前角色不能重试该任务。");
@@ -160,6 +179,9 @@ export function CMSProvider({ children }: { children: ReactNode }) {
             if (v) {
               v.process = "处理中";
               v.tagStatus = "打标中";
+              if (v.pageStates)
+                for (const page of Object.values(v.pageStates))
+                  if (page.status === "失败") page.status = "打标中";
             }
           }
       },
@@ -170,69 +192,6 @@ export function CMSProvider({ children }: { children: ReactNode }) {
       },
     );
     toast("失败项正在重新处理。");
-  };
-  const reprocess = (ids: string[], protect = true) => {
-    if (!can("rerun")) return toast("当前角色没有批量重跑权限。");
-    const permitted = assets.filter((a) => ids.includes(a.id));
-    const conflicts = protect
-      ? permitted
-          .flatMap((a) =>
-            current(a)
-              .tags.filter((t) => t.origin === "人工")
-              .map((t) => ({
-                assetId: a.id,
-                version: a.current,
-                tagId: t.tagId,
-                proposedId:
-                  state.tags.find(
-                    (candidate) =>
-                      candidate.enabled &&
-                      candidate.id !== t.tagId &&
-                      candidate.group ===
-                        state.tags.find((tag) => tag.id === t.tagId)?.group,
-                  )?.id || t.tagId,
-              })),
-          )
-          .filter((conflict) => conflict.tagId !== conflict.proposedId)
-      : [];
-    update(
-      (s) => {
-        for (const a of s.assets.filter((a) =>
-          permitted.some((p) => p.id === a.id),
-        )) {
-          const v = current(a);
-          v.process = "处理中";
-          v.tagStatus = "打标中";
-          if (!protect) v.tags = v.tags.filter((t) => t.origin !== "人工");
-        }
-        s.tasks.unshift({
-          id: uid("task"),
-          name: `${permitted.length} 份内容 · 标签重跑`,
-          type: "标签重跑",
-          status: "处理中",
-          items: permitted.map((a) => ({
-            assetId: a.id,
-            version: a.current,
-            label: current(a).title,
-            status: "处理中",
-          })),
-          conflicts,
-          attempts: 1,
-          createdAt: now(),
-          finishAt: Date.now() + 2200,
-        });
-      },
-      {
-        action: "批量重跑标签",
-        object: `${permitted.length} 份内容`,
-        detail: protect
-          ? "保护人工标签，冲突待人工处理。"
-          : "已明确选择覆盖人工结果。",
-        category: "标签",
-      },
-      "rerun",
-    );
-    toast("重跑任务已开始，可以离开页面。");
   };
   useEffect(() => {
     const timer = setInterval(() => {
@@ -255,23 +214,103 @@ export function CMSProvider({ children }: { children: ReactNode }) {
             item.error = undefined;
             const asset = s.assets.find((a) => a.id === item.assetId);
             const v = asset?.versions.find((v) => v.number === item.version);
-            if (v && (task.type === "解析与打标" || task.type === "标签重跑")) {
-              v.process = "完成";
+            if (v && task.type === "解析与打标") {
+              if (task.type === "解析与打标") v.process = "完成";
               v.tagStatus = "已完成";
+              if (!v.pageStates && ["PDF", "PPT", "Word"].includes(v.kind))
+                v.pageStates = Object.fromEntries(
+                  Array.from({ length: v.pages }, (_, i) => [
+                    i + 1,
+                    { status: "完成" },
+                  ]),
+                );
+              if (v.pageStates)
+                for (const page of Object.values(v.pageStates))
+                  if (page.status === "打标中" || page.status === "待打标") {
+                    page.status = "完成";
+                    page.error = undefined;
+                  }
               v.unmatched = undefined;
               if (!v.tags.some((t) => t.origin === "AI" && !t.page))
-                v.tags.push(
-                  { tagId: "t3", origin: "AI" },
-                  { tagId: "t5", origin: "AI" },
+                for (const id of ["t3", "t5"]) {
+                  const tag = s.tags.find((t) => t.id === id);
+                  if (
+                    tag &&
+                    availableTag(s.tags, tag) &&
+                    !v.tags.some((b) => b.tagId === id && !b.page)
+                  )
+                    v.tags.push({ tagId: id, origin: "AI" });
+                }
+              if (["PDF", "PPT", "Word"].includes(v.kind)) {
+                const choices = s.tags.filter(
+                  (t) =>
+                    t.parentId === primaryTagId("页面类型") &&
+                    availableTag(s.tags, t),
                 );
+                for (let page = 1; page <= v.pages; page++) {
+                  const tag = choices[(page - 1) % Math.max(1, choices.length)];
+                  if (tag && !v.tags.some((b) => b.page === page))
+                    v.tags.push({ tagId: tag.id, origin: "AI", page });
+                }
+              }
+              const parent = s.tags.find(
+                (t) =>
+                  t.parentId === null &&
+                  t.id === primaryTagId("Key Message") &&
+                  t.enabled,
+              );
+              if (parent) {
+                const name = "研究要点提炼";
+                const known = s.tags.find(
+                  (t) =>
+                    t.parentId === parent.id &&
+                    t.name === name &&
+                    availableTag(s.tags, t),
+                );
+                if (known) {
+                  if (!v.tags.some((b) => b.tagId === known.id && !b.page))
+                    v.tags.push({ tagId: known.id, origin: "AI" });
+                } else {
+                  let suggestion = s.suggestions.find(
+                    (r) => r.parentId === parent.id && r.name === name,
+                  );
+                  if (!suggestion) {
+                    suggestion = {
+                      id: uid("suggestion"),
+                      name,
+                      parentId: parent.id,
+                      mentions: 0,
+                      assetIds: [],
+                      contexts: [],
+                      accepted: [],
+                      status: "待处理",
+                    };
+                    s.suggestions.unshift(suggestion);
+                  }
+                  if (
+                    !suggestion.contexts?.some(
+                      (c) => c.assetId === asset!.id && c.version === v.number,
+                    )
+                  ) {
+                    suggestion.contexts ||= [];
+                    suggestion.contexts.push({
+                      assetId: asset!.id,
+                      version: v.number,
+                    });
+                    suggestion.mentions++;
+                  }
+                  if (!suggestion.assetIds.includes(asset!.id))
+                    suggestion.assetIds.push(asset!.id);
+                  v.tagStatus = "未匹配";
+                  v.unmatched = "有新的标签建议待处理（原型模拟）。";
+                }
+              }
             }
           }
           s.notices.unshift({
             id: uid("notice"),
             title: `${task.name}已完成`,
-            detail: task.conflicts?.length
-              ? `人工标签已保留，有 ${task.conflicts.length} 项差异可核对。`
-              : "查看处理结果。",
+            detail: "查看处理结果。",
             route: "tasks",
             read: false,
             at: now(),
@@ -281,6 +320,16 @@ export function CMSProvider({ children }: { children: ReactNode }) {
     }, 500);
     return () => clearInterval(timer);
   }, [update]);
+  if (loadFailure)
+    return (
+      <main className="empty">
+        <h2>保存的内容未被覆盖</h2>
+        <p>{loadFailure}。请保留当前浏览器资料并联系项目人员处理。</p>
+        <button className="btn btn-primary" onClick={() => location.reload()}>
+          重新加载
+        </button>
+      </main>
+    );
   return (
     <Context.Provider
       value={{
@@ -293,7 +342,6 @@ export function CMSProvider({ children }: { children: ReactNode }) {
         toast,
         notify,
         retryTask,
-        reprocess,
         addTask,
       }}
     >

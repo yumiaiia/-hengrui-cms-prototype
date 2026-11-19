@@ -16,8 +16,8 @@ const demoRoles = [
   {
     roleId: "admin",
     account: "chenlili",
-    label: "管理员",
-    hint: "用户、角色与审计",
+    label: "超级管理员",
+    hint: "用户与角色管理",
   },
   {
     roleId: "medical",
@@ -37,7 +37,7 @@ export default function Login() {
   const { state, update, toast } = useCMS();
   const [account, setAccount] = useState(
     () =>
-      state.users.find((user) => user.account === "chenlili")?.account ||
+      state.users.find((user) => user.id === "u1")?.account ||
       state.users[0]?.account ||
       "",
   );
@@ -45,7 +45,9 @@ export default function Login() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const selectedUser = state.users.find(
-    (user) => user.account === account.trim(),
+    (user) =>
+      user.enabled !== false &&
+      user.account.toLowerCase() === account.trim().toLowerCase(),
   );
   const selectedRole = state.roles.find(
     (role) => role.id === selectedUser?.roleId,
@@ -55,8 +57,14 @@ export default function Login() {
     if (!state.roles.some((role) => role.id === roleId)) return undefined;
     return (
       state.users.find(
-        (user) => user.account === preferredAccount && user.roleId === roleId,
-      ) || state.users.find((user) => user.roleId === roleId)
+        (user) =>
+          user.enabled !== false &&
+          user.account === preferredAccount &&
+          user.roleId === roleId,
+      ) ||
+      state.users.find(
+        (user) => user.enabled !== false && user.roleId === roleId,
+      )
     );
   }
 
@@ -68,10 +76,8 @@ export default function Login() {
 
   function login(user: User | undefined, method: "account" | "sso") {
     if (busy) return;
-    if (!user)
-      return setError(
-        "请输入当前浏览器中已存在的账号，拼写和大小写需与账号列表一致。",
-      );
+    if (!user || user.enabled === false)
+      return setError("请输入已启用账号的邮箱。");
     const assignedRole = state.roles.find((role) => role.id === user.roleId);
     if (!assignedRole)
       return setError("该账号未关联有效角色，请让演示管理员修复角色配置。");
@@ -92,14 +98,22 @@ export default function Login() {
     if (saved) {
       setPassword("");
       toast(`已切换为 ${user.name} 的本地演示身份。`);
-      go("workbench");
+      go(
+        assignedRole.menus.includes("workbench")
+          ? "workbench"
+          : assignedRole.menus[0] || "workbench",
+      );
     } else setError("演示身份未保存。请检查浏览器存储空间后重试。");
   }
 
   function submit(event: FormEvent) {
     event.preventDefault();
     login(
-      state.users.find((user) => user.account === account.trim()),
+      state.users.find(
+        (user) =>
+          user.enabled !== false &&
+          user.account.toLowerCase() === account.trim().toLowerCase(),
+      ),
       "account",
     );
   }
@@ -193,21 +207,24 @@ export default function Login() {
                 <option value="" disabled>
                   手动填写账号 / 未匹配账号
                 </option>
-                {state.users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name} · {user.account}
-                  </option>
-                ))}
+                {state.users
+                  .filter((user) => user.enabled !== false)
+                  .map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} · {user.account}
+                    </option>
+                  ))}
               </select>
             </Field>
-            <Field label="平台账号" required error={error || undefined}>
+            <Field label="登录邮箱" required error={error || undefined}>
               <input
                 required
+                type="email"
                 autoComplete="username"
                 spellCheck={false}
                 autoCapitalize="none"
                 value={account}
-                placeholder="输入已有账号，例如 medical"
+                placeholder="输入已创建账号的邮箱"
                 onChange={(event) => {
                   setAccount(event.target.value);
                   setError("");
@@ -237,7 +254,7 @@ export default function Login() {
                 </strong>
                 <span>
                   {selectedRole
-                    ? `${selectedRole.dataRange === "all" ? "全部内容" : "仅本人创建的内容"} · 沿用当前角色权限`
+                    ? "沿用当前角色的菜单与操作权限"
                     : "请从已有账号列表选择，不会自动创建账号或授予权限。"}
                 </span>
               </div>

@@ -16,16 +16,17 @@ import {
   HelpCircle,
   ArrowUpRight,
   X,
+  Send,
   CheckCheck,
 } from "lucide-react";
 import { useCMS } from "../store";
 import { go, dateLabel } from "../model";
 import { Dialog, Badge, Button, Empty } from "./ui";
 const menu = [
-  { id: "workbench", name: "工作台", en: "WORKSPACE", icon: LayoutDashboard },
+  { id: "workbench", name: "工作台", icon: LayoutDashboard },
   { id: "library", name: "内容库", icon: FolderOpen },
+  { id: "publishing", name: "发布管理", icon: Send },
   { id: "collection", name: "公众号采集", icon: Radio },
-  { id: "credentials", name: "审批凭证", icon: ShieldCheck },
   { id: "tags", name: "标签管理", icon: Tags },
   { id: "admin", name: "系统管理", icon: Settings2 },
 ];
@@ -42,41 +43,9 @@ export default function Shell({
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [profile, setProfile] = useState(false);
   const [help, setHelp] = useState(false);
-  const notices = state.notices
-    .filter((n) => {
-      if (n.adminOnly) return role?.permissions.includes("admin");
-      if (role?.dataRange === "all") return true;
-      const [path, query] = n.route.split("?");
-      const params = new URLSearchParams(query);
-      if (path.startsWith("content/"))
-        return assets.some((a) => a.id === path.slice(8));
-      if (path === "credentials")
-        return assets.some((a) =>
-          a.versions.some(
-            (v) => v.approval.credentialId === params.get("open"),
-          ),
-        );
-      if (path === "library")
-        return assets.some(
-          (a) =>
-            a.versions.find((v) => v.number === a.current)?.approval.mode ===
-            params.get("approval"),
-        );
-      if (path === "tasks")
-        return state.tasks.some(
-          (t) =>
-            t.items.length > 0 &&
-            t.items.every(
-              (i) => i.assetId && assets.some((a) => a.id === i.assetId),
-            ),
-        );
-      return false;
-    })
-    .map((n) =>
-      role?.dataRange === "own" && n.route.startsWith("library")
-        ? { ...n, title: "有内容需要补充审批信息" }
-        : n,
-    );
+  const notices = state.notices.filter(
+    (n) => !n.adminOnly || role?.permissions.includes("admin"),
+  );
   const unread = notices.filter((n) => !n.read).length;
   const visibleIds = new Set(assets.map((a) => a.id));
   const tasks = state.tasks.filter(
@@ -87,7 +56,12 @@ export default function Shell({
   const processing = tasks.filter(
     (t) => t.status === "处理中" || t.status === "排队中",
   ).length;
-  const active = route === "content" || route === "upload" ? "library" : route;
+  const active =
+    route === "content" || route === "upload"
+      ? "library"
+      : route === "publication-preview"
+        ? "publishing"
+        : route;
   return (
     <div className={`app-shell ${collapsed ? "nav-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -96,7 +70,11 @@ export default function Shell({
           href="#/workbench"
           onClick={(e) => {
             e.preventDefault();
-            go("workbench");
+            go(
+              role?.menus.includes("workbench")
+                ? "workbench"
+                : role?.menus[0] || "workbench",
+            );
           }}
         >
           <span className="brand-symbol">
@@ -302,8 +280,7 @@ export default function Shell({
               <Badge tone="blue">内容管理</Badge>
               <h3>添加内容与审批登记</h3>
               <p>
-                添加文件后，勾选需要共用凭证的内容。每个版本最多关联一条凭证，免登记须有对应权限。OCR
-                异常可人工核对后继续。
+                为本次所有文件统一选择审批规则。需要登记时只上传一张截图，填写一次编号和有效期；识别有差异时可人工核对后继续。
               </p>
             </section>
             <section>

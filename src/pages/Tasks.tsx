@@ -31,12 +31,12 @@ import { getFile, download } from "../storage";
 import { useCMS } from "../store";
 import "./admin.css";
 
-const types: Task["type"][] = ["OCR", "采集", "解析与打标", "标签重跑", "导出"];
+const types: Task["type"][] = ["OCR", "采集", "解析与打标", "导出"];
 const statuses: Process[] = ["排队中", "处理中", "完成", "部分失败", "失败"];
 const failed = (item: TaskItem) =>
   item.status === "失败" || item.status === "部分失败";
 const retryPermission = (task: Task): Permission =>
-  task.type === "标签重跑" ? "rerun" : task.type === "导出" ? "export" : "edit";
+  task.type === "导出" ? "export" : task.type === "采集" ? "collect" : "edit";
 const taskVisible = (task: Task, assets: Asset[], canExport: boolean) =>
   types.includes(task.type) &&
   (task.type !== "导出" || canExport) &&
@@ -44,9 +44,6 @@ const taskVisible = (task: Task, assets: Asset[], canExport: boolean) =>
   task.items.every(
     (item) =>
       !!item.assetId && assets.some((asset) => asset.id === item.assetId),
-  ) &&
-  (task.conflicts || []).every((conflict) =>
-    assets.some((asset) => asset.id === conflict.assetId),
   );
 const itemVersion = (item: TaskItem, assets: Asset[]) => {
   const asset = assets.find((asset) => asset.id === item.assetId);
@@ -84,7 +81,7 @@ export default function Tasks() {
         <PageHeader title="任务中心" />
         <Empty
           title="请先选择演示账号"
-          description="任务结果按当前账号的内容范围展示。"
+          description="登录后查看内容处理任务。"
           action={<Button onClick={() => go("login")}>前往演示登录</Button>}
         />
       </div>
@@ -327,17 +324,6 @@ export default function Tasks() {
         can("export") ? (
           <Button onClick={() => go("library")}>从内容库重新导出</Button>
         ) : null}
-        {task.type === "标签重跑" &&
-        task.conflicts?.some((conflict) => !conflict.resolved) &&
-        role?.menus.includes("tags") &&
-        can("rerun") ? (
-          <Button
-            icon={<ArrowUpRight size={14} />}
-            onClick={() => go("tags?tab=rerun")}
-          >
-            核对标签冲突
-          </Button>
-        ) : null}
       </div>
     );
   }
@@ -347,7 +333,7 @@ export default function Tasks() {
       <PageHeader
         eyebrow="BUSINESS TASKS"
         title="任务中心"
-        description="查看可见内容的处理结果，定位失败项并获取已生成的文件。"
+        description="查看内容处理结果，定位失败项并获取已生成的文件。"
       />
       <div className="cms-task-summary">
         {summary.map((item) => (
@@ -363,10 +349,10 @@ export default function Tasks() {
           </section>
         ))}
       </div>
-      <Note>
-        这里只展示全部关联内容都在当前可见范围内的业务任务；无法确认归属的任务不展示。处理状态为本地原型演示，不代表真实
-        OCR、采集、解析或媒体处理结果。
-      </Note>
+      <details className="prototype-controls collection-demo-note">
+        <summary>原型演示说明</summary>
+        <p>处理进度使用本地演示数据，尚未连接采集和解析服务。</p>
+      </details>
       <section className="panel">
         <div className="toolbar cms-task-toolbar">
           <SearchBox
@@ -447,12 +433,6 @@ export default function Tasks() {
                                 未提供原视频文件 · 仅状态演示
                               </div>
                             ) : null}
-                            {task.type === "标签重跑" &&
-                            task.conflicts?.some(
-                              (conflict) => !conflict.resolved,
-                            ) ? (
-                              <div className="muted">有人工标签差异待核对</div>
-                            ) : null}
                           </td>
                           <td>{task.type}</td>
                           <td>
@@ -493,7 +473,7 @@ export default function Tasks() {
         ) : (
           <Empty
             title="没有可见的匹配任务"
-            description="调整类型、状态或关键词。账号只能查看全部项目都属于其可见内容范围的任务。"
+            description="调整类型、状态或关键词后再试。"
           />
         )}
       </section>
@@ -549,7 +529,7 @@ export default function Tasks() {
           ) : null}
           {selected.type === "导出" ? (
             <Note>
-              下载读取本地保存的文件包与生成时的版本审批快照，不以当前凭证改写历史结果。下载前核对包内清单、全部项目的当前可见范围，以及是否实际包含审批截图；含截图的包还需截图权限。此检查仅是本地原型的界面边界，不是服务端安全保证。
+              导出文件保留生成时的内容版本与审批信息，内容更新不会改变已生成的文件。包含审批截图的文件需要对应下载权限。
             </Note>
           ) : null}
           <div className="table-wrap">
@@ -625,17 +605,6 @@ export default function Tasks() {
               </tbody>
             </table>
           </div>
-          {selected.type === "标签重跑" && selected.conflicts?.length ? (
-            <p className="muted">
-              人工标签差异：
-              {
-                selected.conflicts.filter((conflict) => !conflict.resolved)
-                  .length
-              }{" "}
-              项待处理 / {selected.conflicts.length}{" "}
-              项；人工结果保留，可前往标签重跑核对。
-            </p>
-          ) : null}
           {taskActions(selected)}
         </Dialog>
       ) : null}

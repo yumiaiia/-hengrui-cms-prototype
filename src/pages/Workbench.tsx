@@ -1,276 +1,285 @@
+import { useState } from "react";
 import {
   ArrowUpRight,
   Plus,
   ShieldCheck,
-  Tag,
   CalendarClock,
   FileWarning,
-  Clock3,
   ArrowRight,
+  Send,
   CheckCircle2,
-  FolderOpen,
 } from "lucide-react";
 import { useCMS } from "../store";
-import { current, expiryStatus, go, dateLabel } from "../model";
-import { AssetImage, Badge, Button, PageHeader, Empty } from "../components/ui";
+import { current, go, dateLabel } from "../model";
+import { Badge, Button, PageHeader, Empty, Pagination } from "../components/ui";
+import { contentAttention, type AttentionCategory } from "../workbench";
 export default function Workbench() {
-  const { assets: allAssets, state, user, can } = useCMS();
-  const assets = allAssets.filter((a) => a.lifecycle === "正常");
-  const pending = assets.filter((a) => current(a).approval.mode === "pending");
-  const unmatched = assets.filter((a) => current(a).tagStatus === "未匹配");
-  const expiring = assets.filter(
-    (a) => expiryStatus(current(a)) === "即将过期",
+  const { assets, state, user, role, can } = useCMS();
+  const [category, setCategory] = useState<AttentionCategory | "all">("all"),
+    [page, setPage] = useState(1);
+  const contentAllowed = !!role?.menus.includes("library"),
+    publishAllowed = !!role?.menus.includes("publishing");
+  const attention = contentAllowed ? contentAttention(assets) : [];
+  const visibleIds = new Set(assets.map((a) => a.id));
+  const publications = publishAllowed
+    ? (state.publications || []).filter((p) => visibleIds.has(p.assetId))
+    : [];
+  const failed = publications.filter(
+    (p) => p.status === "处理失败" || p.status === "状态待确认",
   );
-  const failures = assets.filter((a) =>
-    ["失败", "部分失败"].includes(current(a).process),
-  );
-  const items = [
+  const upcoming = publications
+    .filter((p) => p.status === "待发布" && p.plannedAt)
+    .sort((a, b) => a.plannedAt.localeCompare(b.plannedAt))
+    .slice(0, 4);
+  const filtered =
+    category === "all"
+      ? attention
+      : attention.filter((i) =>
+          i.issues.some((issue) => issue.category === category),
+        );
+  const cards = [
     {
-      name: "审批信息待补充",
-      count: pending.length,
+      id: "approval" as const,
+      name: "审批待补充",
+      caption: "补充编号和截图，或选择无需登记",
       icon: ShieldCheck,
       tone: "blue",
-      route: "library?approval=pending",
-      caption: "选择凭证或免登记",
     },
     {
-      name: "标签未匹配",
-      count: unmatched.length,
-      icon: Tag,
-      tone: "cyan",
-      route: "library?tagStatus=未匹配",
-      caption: "核对标签与原文",
-    },
-    {
-      name: "即将过期",
-      count: expiring.length,
-      icon: CalendarClock,
-      tone: "amber",
-      route: "library?expiry=即将过期",
-      caption: "未来 30 天内到期",
-    },
-    {
-      name: "处理异常",
-      count: failures.length,
+      id: "processing" as const,
+      name: "解析与标签异常",
+      caption: "解析失败、打标失败及未匹配标签",
       icon: FileWarning,
       tone: "rose",
-      route: "library?process=异常",
-      caption: "查看原因并重试",
+    },
+    {
+      id: "expiry" as const,
+      name: "有效期提醒",
+      caption: "已过期及未来 30 天内到期的内容",
+      icon: CalendarClock,
+      tone: "amber",
     },
   ];
-  const todo = [
-    ...pending.map((a) => ({
-      a,
-      reason: "补充审批信息",
-      badge: "待补充",
-      tab: "approval",
-    })),
-    ...unmatched.map((a) => ({
-      a,
-      reason: "核对未匹配标签",
-      badge: "未匹配",
-      tab: "tags",
-    })),
-    ...failures.map((a) => ({
-      a,
-      reason: "查看处理失败原因",
-      badge: "处理失败",
-      tab: "basic",
-    })),
-  ];
-  const visible = new Set(assets.map((a) => a.id));
-  const tasks = state.tasks
-    .filter(
-      (t) =>
-        t.items.length > 0 &&
-        t.items.every((i) => i.assetId && visible.has(i.assetId)),
-    )
-    .slice(0, 3);
+  function select(value: AttentionCategory | "all") {
+    setCategory(value);
+    setPage(1);
+  }
   return (
-    <>
+    <div className="workbench-focused">
       <PageHeader
-        eyebrow="工作空间 / OVERVIEW"
-        title={`${new Date().getHours() < 12 ? "上午好" : new Date().getHours() < 18 ? "下午好" : "晚上好"}，${user?.name || "欢迎回来"}`}
-        description="让每一份内容，都有清晰的来处与去向。"
+        title="工作台"
+        description={`${user?.name || "你好"}，查看需要处理的内容与近期发布安排。`}
         action={
-          can("upload") ? (
+          can("upload") && contentAllowed ? (
             <Button
               variant="primary"
-              icon={<Plus size={17} />}
+              icon={<Plus size={16} />}
               onClick={() => go("upload")}
             >
-              新增内容
+              上传内容
             </Button>
-          ) : null
+          ) : undefined
         }
       />
-      <div className="workspace-intro">
-        <span>
-          <i />
-          内容工作空间
-        </span>
-        <small>
-          {new Date().toLocaleDateString("zh-CN", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-            weekday: "long",
-          })}
-        </small>
-      </div>
-      <div className="queue-grid">
-        {items.map((item) => (
+      <div
+        className={`queue-grid workbench-attention-grid ${!publishAllowed ? "without-publications" : ""}`}
+      >
+        {contentAllowed
+          ? cards.map((item) => (
+              <button
+                key={item.id}
+                aria-pressed={category === item.id}
+                className={`queue-card queue-${item.tone} ${category === item.id ? "is-selected" : ""}`}
+                onClick={() => select(category === item.id ? "all" : item.id)}
+              >
+                <div className="queue-top">
+                  <span className="queue-icon">
+                    <item.icon size={20} />
+                  </span>
+                  <ArrowUpRight size={15} />
+                </div>
+                <div className="queue-count">
+                  {
+                    attention.filter((i) =>
+                      i.issues.some((issue) => issue.category === item.id),
+                    ).length
+                  }
+                  <small>份内容</small>
+                </div>
+                <strong>{item.name}</strong>
+                <p>{item.caption}</p>
+              </button>
+            ))
+          : null}
+        {publishAllowed ? (
           <button
-            key={item.name}
-            className={`queue-card queue-${item.tone}`}
-            onClick={() => go(item.route)}
+            className="queue-card queue-cyan"
+            onClick={() => go("publishing?status=需处理")}
           >
             <div className="queue-top">
               <span className="queue-icon">
-                <item.icon size={21} strokeWidth={1.7} />
+                <Send size={20} />
               </span>
-              <ArrowUpRight size={16} />
+              <ArrowUpRight size={15} />
             </div>
             <div className="queue-count">
-              {item.count}
-              <small>份内容</small>
+              {failed.length}
+              <small>条记录</small>
             </div>
-            <strong>{item.name}</strong>
-            <p>{item.caption}</p>
+            <strong>发布需处理</strong>
+            <p>发布失败或状态待确认</p>
           </button>
-        ))}
+        ) : null}
       </div>
-      <div className="workbench-columns">
-        <section className="panel todo-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>
-                待处理事项 <span className="count-pill">{todo.length}</span>
-              </h2>
-              <p>从需要你关注的内容开始</p>
-            </div>
-            <Button variant="ghost" onClick={() => go("library")}>
-              查看全部
-              <ArrowRight size={15} />
-            </Button>
-          </div>
-          {todo.length ? (
-            <div className="todo-list">
-              {todo.slice(0, 5).map((item, i) => (
-                <div className="todo-row" key={item.a.id + item.reason}>
-                  <span
-                    className={`file-icon type-${current(item.a).kind === "PDF" ? "pdf" : "other"}`}
-                  >
-                    {current(item.a).kind === "PDF" ? "PDF" : "DOC"}
-                  </span>
-                  <div className="todo-main">
-                    <strong>{current(item.a).title}</strong>
-                    <p>
-                      {item.reason}
-                      <span>· {item.a.code}</span>
-                    </p>
-                  </div>
-                  <Badge>{item.badge}</Badge>
-                  <button
-                    className="round-arrow"
-                    aria-label={`处理${current(item.a).title}`}
-                    onClick={() => go(`content/${item.a.id}?tab=${item.tab}`)}
-                  >
-                    <ArrowRight size={17} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty
-              title="全部工作已处理"
-              description="没有需要处理的事项，可以继续添加内容。"
-              action={<Button onClick={() => go("library")}>查看内容库</Button>}
-            />
-          )}
-        </section>
-        <section className="panel task-preview">
-          <div className="panel-heading">
-            <div>
-              <h2>处理动态</h2>
-              <p>后台任务，无需停留等待</p>
-            </div>
-            <Clock3 size={18} className="muted" />
-          </div>
-          {tasks.map((task) => (
-            <button
-              key={task.id}
-              className="mini-task"
-              onClick={() => go("tasks")}
-            >
-              <span
-                className={`task-timeline-dot ${task.status === "完成" ? "success" : ""}`}
-              />
+      <div
+        className={`workbench-columns ${!publishAllowed ? "workbench-one-column" : ""}`}
+      >
+        {contentAllowed ? (
+          <section className="panel todo-panel">
+            <div className="panel-heading">
               <div>
-                <strong>{task.name}</strong>
-                <small>{dateLabel(task.createdAt)}</small>
-                <Badge>{task.status}</Badge>
+                <h2>
+                  待处理内容{" "}
+                  <span className="count-pill">{filtered.length}</span>
+                </h2>
+                <p>
+                  {category === "all"
+                    ? "同一份内容合并展示；点击上方卡片筛选。"
+                    : `当前筛选：${cards.find((item) => item.id === category)?.name}`}
+                </p>
               </div>
-            </button>
-          ))}
-          {!tasks.length ? (
-            <p className="muted empty-small">暂时没有处理任务</p>
-          ) : null}
-          <button className="task-bottom" onClick={() => go("tasks")}>
-            打开任务中心
-            <ArrowRight size={15} />
-          </button>
-          <div className="quiet-note">
-            <CheckCircle2 size={15} />
-            原文件已归档，AI 处理独立进行
-          </div>
-        </section>
-      </div>
-      <section className="recent-section">
-        <div className="section-heading">
-          <div>
-            <h2>最近的内容</h2>
-            <p>继续查看或维护你的内容资产</p>
-          </div>
-          <Button variant="ghost" onClick={() => go("library")}>
-            进入内容库
-            <ArrowRight size={15} />
-          </Button>
-        </div>
-        <div className="recent-grid">
-          {[...assets]
-            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-            .slice(0, 4)
-            .map((a) => {
-              const v = current(a);
-              return (
+              {category !== "all" ? (
+                <Button variant="ghost" onClick={() => select("all")}>
+                  显示全部
+                </Button>
+              ) : null}
+            </div>
+            {filtered.length ? (
+              <>
+                <div className="todo-list">
+                  {filtered.slice((page - 1) * 6, page * 6).map((item) => {
+                    const a = item.asset,
+                      v = current(a),
+                      target =
+                        category === "all"
+                          ? item.issues[0]
+                          : item.issues.find((i) => i.category === category)!;
+                    return (
+                      <div className="todo-row" key={a.id}>
+                        <span
+                          className={`file-icon type-${v.kind === "PDF" ? "pdf" : "other"}`}
+                        >
+                          <small>{v.kind}</small>
+                        </span>
+                        <div className="todo-main">
+                          <button
+                            className="title-link"
+                            onClick={() => go(`content/${a.id}`)}
+                          >
+                            {v.title}
+                          </button>
+                          <p>
+                            {a.code} · V{v.number}.0
+                          </p>
+                          <div className="workbench-issue-tags">
+                            {item.issues.map((issue) => (
+                              <Badge
+                                key={issue.category}
+                                tone={
+                                  issue.priority === 0
+                                    ? "red"
+                                    : issue.category === "expiry"
+                                      ? "amber"
+                                      : "blue"
+                                }
+                              >
+                                {issue.label}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          onClick={() => go(target.route)}
+                        >
+                          去处理 <ArrowRight size={14} />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Pagination
+                  total={filtered.length}
+                  page={page}
+                  size={6}
+                  onChange={setPage}
+                />
+              </>
+            ) : (
+              <Empty
+                title="当前分类暂无待处理内容"
+                description={
+                  category === "all"
+                    ? "需要补充、核对或重试的内容会显示在这里。"
+                    : "可以切换分类，查看其他待处理内容。"
+                }
+                action={
+                  <Button
+                    onClick={() =>
+                      category === "all" ? go("library") : select("all")
+                    }
+                  >
+                    {category === "all" ? "进入内容库" : "查看全部分类"}
+                  </Button>
+                }
+              />
+            )}
+          </section>
+        ) : null}
+        {publishAllowed ? (
+          <aside className="panel workbench-schedule">
+            <div className="panel-heading">
+              <div>
+                <h2>近期发布</h2>
+                <p>按拟发布时间排序</p>
+              </div>
+              <CalendarClock size={19} />
+            </div>
+            {upcoming.length ? (
+              upcoming.map((p) => (
                 <button
-                  className="recent-card"
-                  key={a.id}
-                  onClick={() => go("content/" + a.id)}
+                  className="workbench-schedule-item"
+                  key={p.id}
+                  onClick={() => go(`publishing?open=${p.id}`)}
                 >
-                  <div className="recent-cover">
-                    {v.cover ? (
-                      <AssetImage src={v.cover} alt="内容封面" />
-                    ) : (
-                      <FolderOpen size={36} />
-                    )}
-                    <span>{v.kind}</span>
-                  </div>
-                  <div className="recent-body">
-                    <h3>{v.title}</h3>
-                    <div>
-                      <small>
-                        {a.code} · V{a.current}.0
-                      </small>
-                      <Badge>{expiryStatus(v)}</Badge>
-                    </div>
-                  </div>
+                  <small>
+                    <CalendarClock size={13} />
+                    {dateLabel(p.plannedAt)}
+                  </small>
+                  <strong>{p.title}</strong>
+                  <span>
+                    V{p.version}.0 <Badge>{p.status}</Badge>
+                  </span>
                 </button>
-              );
-            })}
-        </div>
-      </section>
-    </>
+              ))
+            ) : (
+              <div className="workbench-schedule-empty">
+                <CheckCircle2 size={27} />
+                <p>暂无待发布安排</p>
+              </div>
+            )}
+            <button className="task-bottom" onClick={() => go("publishing")}>
+              进入发布管理 <ArrowRight size={14} />
+            </button>
+          </aside>
+        ) : null}
+      </div>
+      {!contentAllowed && !publishAllowed ? (
+        <Empty
+          title="当前角色暂无内容工作权限"
+          description="可通过左侧菜单进入已授权的模块。"
+        />
+      ) : null}
+    </div>
   );
 }

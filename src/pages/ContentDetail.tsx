@@ -1,36 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Send,
+  Info,
+  ShieldCheck,
+  Tags,
+  CheckCircle2,
   Download,
   Upload,
   History,
-  Plus,
-  X,
+  FileText,
+  Maximize,
+  Edit3,
+  RotateCw,
   ChevronLeft,
   ChevronRight,
   ZoomIn,
   ZoomOut,
-  Maximize,
-  FileText,
-  ShieldCheck,
   ExternalLink,
-  Tag as TagIcon,
-  RotateCw,
-  Edit3,
   ArchiveX,
-  AlertCircle,
-  Search,
 } from "lucide-react";
 import { useCMS } from "../store";
 import {
-  approvalLabel,
   current,
-  credentialLatest,
-  expiryStatus,
-  go,
   dateLabel,
+  expiryStatus,
+  approvalLabel,
   ocrWarnings,
   now,
+  uid,
+  go,
 } from "../model";
 import { loadBlob, download } from "../storage";
 import {
@@ -45,228 +44,244 @@ import {
   PageHeader,
   Tabs,
 } from "../components/ui";
+import { TagPanel } from "../components/TagPanel";
+import { ApprovalEditor } from "../components/ApprovalEditor";
 import { ExportDialog } from "../export";
+import { DocumentReader, PageCanvas } from "../components/DocumentReader";
+import { failedPages, paginated, pageState } from "../workflow";
 export default function ContentDetail({ id }: { id: string }) {
-  const { assets, state, can, update, toast, retryTask } = useCMS();
+  const { state, assets, can, update, toast, retryTask } = useCMS();
   const asset = assets.find((a) => a.id === id);
+  const params = new URLSearchParams(location.hash.split("?")[1]);
   const [number, setNumber] = useState(
-    Number(new URLSearchParams(location.hash.split("?")[1]).get("version")) ||
-      asset?.current ||
-      1,
+    Number(params.get("version")) || asset?.current || 1,
   );
-  const [tab, setTab] = useState(
-    new URLSearchParams(location.hash.split("?")[1]).get("tab") || "basic",
+  const [page, setPage] = useState(
+    Math.max(1, Number(params.get("page")) || 1),
   );
-  const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState(100);
-  const [url, setUrl] = useState("");
-  const [fileError, setFileError] = useState("");
-  const [modal, setModal] = useState("");
-  const [tagId, setTagId] = useState("");
-  const [scope, setScope] = useState("material");
-  const [credentialId, setCredentialId] = useState("");
+  const [pageCount, setPageCount] = useState(0);
+  const [pageRetry, setPageRetry] = useState<number>();
+  const [modal, setModal] = useState(
+    params.get("tab") === "approval" ? "approval-info" : "",
+  );
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [cover, setCover] = useState("");
+  const [thumbnail, setThumbnail] = useState("");
+  const [expiry, setExpiry] = useState("");
   const [reason, setReason] = useState("");
-  const [editTitle, setEditTitle] = useState("");
-  const [editSummary, setEditSummary] = useState("");
-  const [editAuthor, setEditAuthor] = useState("");
-  const [editCover, setEditCover] = useState("");
-  const [editThumbnail, setEditThumbnail] = useState("");
-  const [editExpiry, setEditExpiry] = useState("");
-  const [search, setSearch] = useState("");
-  const preview = useRef<HTMLDivElement>(null);
   const v =
     asset?.versions.find((v) => v.number === number) ||
     (asset ? current(asset) : undefined);
-  const historical = asset && v ? v.number !== asset.current : false;
   useEffect(() => {
     setNumber(
       Number(new URLSearchParams(location.hash.split("?")[1]).get("version")) ||
         asset?.current ||
         1,
     );
-    setPage(1);
+    setPage(
+      Math.max(
+        1,
+        Number(new URLSearchParams(location.hash.split("?")[1]).get("page")) ||
+          1,
+      ),
+    );
   }, [id]);
-  useEffect(() => {
-    setUrl("");
-    setFileError("");
-    if (!v) return;
-    let active = true;
-    let object = "";
-    const source = v.previewUrl || v.fileUrl;
-    if (v.fileKey && !v.previewUrl) {
-      loadBlob(v.fileKey)
-        .then((blob) => {
-          if (!active) return;
-          object = URL.createObjectURL(blob);
-          setUrl(object);
-        })
-        .catch((e) => {
-          if (active) setFileError(e.message);
-        });
-    } else if (source) setUrl(source);
-    return () => {
-      active = false;
-      if (object) URL.revokeObjectURL(object);
-    };
-  }, [v?.fileKey, v?.fileUrl, v?.previewUrl, number, id]);
   if (!asset || !v)
     return (
       <Empty
-        title="内容不可访问"
-        description="这份内容不存在，或当前角色没有查看权限。"
+        title="无法访问内容"
+        description="内容不存在，或当前账号没有查看权限。"
         action={<Button onClick={() => go("library")}>返回内容库</Button>}
       />
     );
-  const editAllowed = can("edit") && !historical;
-  const tagAllowed = can("tags") && !historical;
-  const tagBindings = v.tags.filter((t) =>
-    scope === "material" ? !t.page : t.page === page,
-  );
-  const affectedTask = state.tasks.find((t) =>
+  const historical = v.number !== asset.current;
+  const editable = can("edit") && !historical && asset.lifecycle === "正常";
+  const task = state.tasks.find((t) =>
     t.items.some(
       (i) =>
         i.assetId === asset.id && i.version === v.number && i.status === "失败",
     ),
   );
+  const shot = v.approval.snapshot?.evidence[0];
+  function reparse() {
+    if (!can("edit") || historical || asset?.lifecycle !== "正常") return;
+    const success = update(
+      (s) => {
+        const a = s.assets.find((a) => a.id === id);
+        if (!a || a.current !== number || a.lifecycle !== "正常") return;
+        const target = current(a);
+        target.process = "处理中";
+        target.tagStatus = "待打标";
+        target.pageStates = Object.fromEntries(
+          Array.from({ length: target.pages }, (_, i) => [
+            i + 1,
+            { status: "待打标" },
+          ]),
+        );
+        s.tasks.unshift({
+          id: uid("task"),
+          name: `${target.title} · 重新解析`,
+          type: "解析与打标",
+          status: "处理中",
+          items: [
+            {
+              assetId: id,
+              version: number,
+              label: target.title,
+              status: "处理中",
+            },
+          ],
+          createdAt: now(),
+          attempts: 1,
+          finishAt: Date.now() + 2200,
+        });
+      },
+      undefined,
+      "edit",
+    );
+    if (success) toast("正在重新解析整份文件。");
+  }
   async function original() {
-    if (!can("export")) return toast("当前角色没有下载权限。");
+    if (!can("export")) return toast("没有下载权限");
     try {
       download(await loadBlob(v!.fileKey, v!.fileUrl), v!.fileName);
     } catch (e) {
-      toast(e instanceof Error ? e.message : "原文件不可用");
+      toast(e instanceof Error ? e.message : "原文件暂不可用");
     }
   }
-  function mutate(
-    recipe: (version: typeof v) => void,
-    action: string,
-    detail = "",
-  ) {
-    update(
+  function markPage(n: number) {
+    if (!can("tags") || historical || asset?.lifecycle !== "正常") return;
+    const ok = update(
       (s) => {
-        const a = s.assets.find((a) => a.id === asset!.id)!;
-        const version = a.versions.find((v) => v.number === number)!;
-        recipe(version);
+        const a = s.assets.find((a) => a.id === id)!;
+        if (a.current !== number || a.lifecycle !== "正常") return;
+        const target = a.versions.find((v) => v.number === number)!;
+        target.pageStates ||= {};
+        target.pageStates[n] = { status: "人工完成" };
         a.updatedAt = now();
       },
-      { action, object: asset!.code, detail },
-      action.includes("标签") ? "tags" : "edit",
+      undefined,
+      "tags",
     );
+    if (ok) toast(`第 ${n} 页已标记为人工处理完成。`);
   }
-  function addTag() {
-    if (!tagId || !tagAllowed) return;
-    mutate(
-      (version) => {
-        if (!version) return;
-        if (
-          !version.tags.some(
-            (t) =>
-              t.tagId === tagId &&
-              t.page === (scope === "page" ? page : undefined),
+  function retryPage(n: number) {
+    if (!can("tags") || historical || asset?.lifecycle !== "正常") return;
+    setPageRetry(n);
+    const versionNumber = number;
+    window.setTimeout(() => {
+      update(
+        (s) => {
+          const a = s.assets.find((a) => a.id === id);
+          const target = a?.versions.find((v) => v.number === versionNumber);
+          if (
+            !a ||
+            !target ||
+            a.lifecycle !== "正常" ||
+            a.current !== versionNumber
           )
-        )
-          version.tags.push({
-            tagId,
-            origin: "人工",
-            page: scope === "page" ? page : undefined,
-          });
-        version.unmatched = undefined;
-        version.tagStatus = "已完成";
-      },
-      "人工校正标签",
-      state.tags.find((t) => t.id === tagId)?.name,
-    );
-    setModal("");
-    toast("标签已更新，人工校正结果会被保留。");
+            return;
+          target.pageStates ||= {};
+          target.pageStates[n] = { status: "完成" };
+          const tag = s.tags.find(
+            (t) =>
+              t.parentId &&
+              s.tags.find((r) => r.id === t.parentId)?.name === "页面类型" &&
+              t.enabled,
+          );
+          if (
+            tag &&
+            !target.tags.some((b) => b.page === n && b.tagId === tag.id)
+          )
+            target.tags.push({ tagId: tag.id, page: n, origin: "AI" });
+          a.updatedAt = now();
+        },
+        undefined,
+        "tags",
+      );
+      setPageRetry(undefined);
+      toast(`第 ${n} 页标签已重新识别。`);
+    }, 1300);
   }
-  function saveBasic() {
-    if (!editTitle.trim()) return toast("内容标题不能为空。");
-    mutate(
-      (version) => {
-        if (!version) return;
-        version.title = editTitle;
-        version.summary = editSummary;
-        version.author = editAuthor;
-        version.cover = editCover;
-        version.thumbnail = editThumbnail;
-        if (version.approval.mode === "exempt") version.expiry = editExpiry;
-      },
-      "修改内容信息",
-      "更新标题、摘要及附属信息；文件版本未变化。",
-    );
-    setModal("");
-    toast("内容信息已保存。");
+  function openEdit() {
+    setTitle(v!.title);
+    setSummary(v!.summary);
+    setCover(v!.cover || "");
+    setThumbnail(v!.thumbnail || "");
+    setExpiry(v!.expiry || "");
+    setModal("edit");
   }
-  function associate() {
-    const c = state.credentials.find((c) => c.id === credentialId);
-    if (!c) return toast("请选择审批凭证。");
-    const revision = credentialLatest(c);
-    mutate(
-      (version) => {
-        if (version)
-          version.approval = {
-            mode: "registered",
-            credentialId: c.id,
-            snapshot: structuredClone(revision),
-          };
+  function saveMeta() {
+    if (!title.trim()) return toast("请输入内容标题");
+    update(
+      (s) => {
+        const a = s.assets.find((a) => a.id === id)!;
+        const target = a.versions.find((v) => v.number === number)!;
+        target.title = title.trim();
+        target.summary = summary;
+        target.cover = cover;
+        target.thumbnail = thumbnail;
+        if (target.approval.mode === "exempt") target.expiry = expiry;
+        a.updatedAt = now();
       },
-      "关联审批凭证",
-      `${revision.number} · 修订 ${revision.revision}`,
+      {
+        action: "修改内容信息",
+        object: asset!.code,
+        detail: "更新标题、摘要与封面，保留文件版本。",
+      },
+      "edit",
     );
     setModal("");
-    toast("审批凭证已关联。");
-  }
-  function exempt() {
-    if (!can("exempt") || historical) return;
-    mutate(
-      (version) => {
-        if (version) version.approval = { mode: "exempt" };
-      },
-      "选择免登记审批",
-      "审批截图与 OCR 不再要求；原操作记录保留。",
-    );
-    setModal("");
-    toast("已设置免登记审批信息。");
+    toast("内容信息已保存");
   }
   return (
-    <>
+    <div className="content-detail-v3">
       <button className="back-link" onClick={() => go("library")}>
         <ArrowLeft size={16} />
         返回内容库
       </button>
       <PageHeader
-        eyebrow={asset.code}
         title={v.title}
-        description={`${v.source} · ${dateLabel(v.createdAt)}归档 · ${state.users.find((u) => u.id === asset.ownerId)?.name || "内容维护人"}`}
+        description={`${asset.code} · ${v.source} · ${dateLabel(v.createdAt)}归档`}
         action={
           <>
             <Button
-              icon={<History size={16} />}
-              onClick={() => setModal("history")}
+              icon={<Info size={16} />}
+              onClick={() => setModal("basic-info")}
             >
-              版本历史
+              内容信息
             </Button>
             <Button
+              icon={<ShieldCheck size={16} />}
+              onClick={() => setModal("approval-info")}
+            >
+              审批信息
+            </Button>
+            <Button
+              icon={<Download size={17} />}
               disabled={!can("export")}
-              icon={<Download size={16} />}
               onClick={original}
             >
               下载原文件
             </Button>
-            {can("upload") ? (
-              <Button
-                variant="primary"
-                disabled={asset.lifecycle === "已作废"}
-                title={
-                  asset.lifecycle === "已作废"
-                    ? "已作废内容只保留历史查询"
-                    : undefined
-                }
-                icon={<Upload size={16} />}
-                onClick={() => go("upload?asset=" + asset.id)}
-              >
-                上传新版本
-              </Button>
-            ) : null}
+            <Button
+              icon={<Upload size={17} />}
+              disabled={!can("upload") || asset.lifecycle === "已作废"}
+              onClick={() => go("upload?asset=" + id)}
+            >
+              上传新版本
+            </Button>
+            <Button
+              variant="primary"
+              icon={<Send size={16} />}
+              disabled={
+                !can("publish") || historical || asset.lifecycle !== "正常"
+              }
+              onClick={() => go(`publishing?asset=${id}&create=1`)}
+            >
+              提交发布
+            </Button>
           </>
         }
       />
@@ -278,562 +293,318 @@ export default function ContentDetail({ id }: { id: string }) {
             onChange={(e) => {
               setNumber(Number(e.target.value));
               setPage(1);
+              setPageCount(0);
             }}
           >
             {[...asset.versions].reverse().map((v) => (
               <option key={v.number} value={v.number}>
-                V{v.number}.0
-                {v.number === asset.current ? " · 当前版本" : " · 历史版本"}
+                V{v.number}.0 ·{" "}
+                {v.number === asset.current ? "当前版本" : "历史版本"}
               </option>
             ))}
           </select>
-          <Badge>{v.process}</Badge>
           <Badge>{expiryStatus(v)}</Badge>
+          <Badge>{v.process}</Badge>
+          {historical ? <span className="muted">历史版本只读</span> : null}
           {asset.lifecycle === "已作废" ? (
             <Badge tone="red">已作废</Badge>
           ) : null}
-          {historical ? (
-            <span className="muted">
-              历史版本只读 · 当前 V{asset.current}.0
-            </span>
-          ) : (
-            <span className="muted">已归档 · AI 处理独立进行</span>
-          )}
+        </div>
+        <div className="actions">
+          <Button
+            variant="ghost"
+            icon={<History size={16} />}
+            onClick={() => setModal("history")}
+          >
+            版本历史
+          </Button>
+          <Button variant="ghost" onClick={() => go(`publishing?asset=${id}`)}>
+            发布记录（
+            {(state.publications || []).filter((p) => p.assetId === id).length}
+            ）
+          </Button>
+          <Button
+            variant="ghost"
+            icon={<Download size={16} />}
+            disabled={!can("export")}
+            onClick={() => setModal("export")}
+          >
+            导出内容包
+          </Button>
+        </div>
+      </div>
+      {v.process === "失败" ? (
+        <Note tone="amber">
+          <span>
+            文件解析失败，重新解析将处理整份文件。
+            {task?.items.find((i) => i.assetId === id)?.error}
+          </span>
+          <Button
+            variant="ghost"
+            icon={<RotateCw size={15} />}
+            disabled={!editable}
+            onClick={reparse}
+          >
+            重新解析整份文件
+          </Button>
+        </Note>
+      ) : null}
+      <div className="detail-material-tags panel">
+        <div>
+          <Tags size={17} />
+          <strong>材料标签</strong>
+        </div>
+        <div className="tag-chips">
+          {v.tags
+            .filter((b) => !b.page)
+            .map((b) => (
+              <span className="tag-chip" key={b.tagId}>
+                {state.tags.find((t) => t.id === b.tagId)?.name}
+              </span>
+            ))}
+          {!v.tags.some((b) => !b.page) ? (
+            <span className="muted">尚未添加材料标签</span>
+          ) : null}
         </div>
         <Button
           variant="ghost"
-          disabled={!can("export")}
-          onClick={() => setModal("export")}
+          disabled={!can("tags") || historical || asset.lifecycle !== "正常"}
+          onClick={() => setModal("material-tags")}
         >
-          结构化导出
-          <Download size={15} />
+          编辑标签
         </Button>
       </div>
-      {v.process === "失败" || v.process === "部分失败" ? (
-        <Note tone="amber">
-          <AlertCircle size={17} />
-          {affectedTask?.items.find((i) => i.assetId === asset.id)?.error ||
-            "后台处理有异常，原文件及历史版本仍可查看。"}
-          {affectedTask ? (
-            <Button variant="ghost" onClick={() => retryTask(affectedTask.id)}>
-              重试失败项
-              <RotateCw size={14} />
+      <div className={`reading-workspace ${paginated(v) ? "" : "is-single"}`}>
+        {paginated(v) ? (
+          <nav className="page-rail" aria-label="文档页面导航">
+            {Array.from({ length: pageCount || v.pages }, (_, i) => i + 1).map(
+              (n) => (
+                <button
+                  key={n}
+                  className={`page-rail-item ${page === n ? "active" : ""} ${pageState(v, n).status === "失败" ? "has-error" : ""}`}
+                  aria-label={`查看第 ${n} 页`}
+                  aria-current={page === n ? "page" : undefined}
+                  onClick={() => setPage(n)}
+                >
+                  <PageCanvas version={v} page={n} thumbnail />
+                  <div className="page-rail-tags">
+                    {v.tags
+                      .filter((b) => b.page === n)
+                      .slice(0, 2)
+                      .map((b) => (
+                        <small key={b.tagId}>
+                          {state.tags.find((t) => t.id === b.tagId)?.name}
+                        </small>
+                      ))}
+                  </div>
+                  <span>
+                    第 {n} 页{" "}
+                    {pageState(v, n).status === "失败" ? <i>打标失败</i> : null}
+                  </span>
+                </button>
+              ),
+            )}
+          </nav>
+        ) : null}
+        <DocumentReader
+          key={`${id}-${v.number}`}
+          version={v}
+          page={page}
+          onPage={setPage}
+          onCount={setPageCount}
+        />
+        {paginated(v) ? (
+          <aside className="page-tags-panel panel">
+            <div className="page-tag-heading">
+              <div>
+                <span className="eyebrow">
+                  {paginated(v)
+                    ? `当前页 · ${page} / ${pageCount || v.pages}`
+                    : "当前内容"}
+                </span>
+                <h2>{paginated(v) ? `第 ${page} 页标签` : "内容标签"}</h2>
+              </div>
+              <Badge>
+                {pageRetry === page
+                  ? "打标中"
+                  : pageState(v, page).status === "完成"
+                    ? "已完成"
+                    : pageState(v, page).status}
+              </Badge>
+            </div>
+            {pageState(v, page).status === "失败" ? (
+              <div className="page-tag-error">
+                <strong>这一页打标失败</strong>
+                <p>文件解析正常，可重新打标，或手动添加后标记完成。</p>
+                <Button
+                  disabled={
+                    !can("tags") ||
+                    historical ||
+                    asset.lifecycle !== "正常" ||
+                    pageRetry !== undefined
+                  }
+                  onClick={() => retryPage(page)}
+                >
+                  重试当前页
+                </Button>
+              </div>
+            ) : null}
+            {failedPages(v).length ? (
+              <div className="failed-page-shortcuts">
+                <span>{failedPages(v).length} 页需要处理</span>
+                {failedPages(v).map((n) => (
+                  <button
+                    key={n}
+                    className={page === n ? "active" : ""}
+                    onClick={() => setPage(n)}
+                  >
+                    第 {n} 页
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <TagPanel
+              key={`page-tags-${v.number}-${page}`}
+              assetId={id}
+              versionNumber={v.number}
+              page={paginated(v) ? page : undefined}
+            />
+            {pageState(v, page).status === "失败" &&
+            can("tags") &&
+            !historical &&
+            asset.lifecycle === "正常" ? (
+              <Button
+                icon={<CheckCircle2 size={16} />}
+                disabled={!v.tags.some((b) => b.page === page)}
+                onClick={() => markPage(page)}
+              >
+                标记为人工处理完成
+              </Button>
+            ) : null}
+          </aside>
+        ) : null}
+      </div>
+      {modal === "material-tags" ? (
+        <Dialog drawer title="材料标签" onClose={() => setModal("")}>
+          <p className="muted">作用于整份内容，不影响各页标签。</p>
+          <TagPanel assetId={id} versionNumber={v.number} />
+        </Dialog>
+      ) : null}
+      {modal === "basic-info" ? (
+        <Dialog drawer title="内容信息" onClose={() => setModal("")}>
+          <dl className="detail-meta">
+            <dt>内容编号</dt>
+            <dd>{asset.code}</dd>
+            <dt>当前查看</dt>
+            <dd>V{v.number}.0</dd>
+            <dt>内容类型</dt>
+            <dd>{v.kind}</dd>
+            <dt>来源</dt>
+            <dd>{v.source}</dd>
+            <dt>归档时间</dt>
+            <dd>{dateLabel(v.createdAt)}</dd>
+            <dt>有效期</dt>
+            <dd>{v.approval.snapshot?.expiry || v.expiry || "未设置"}</dd>
+          </dl>
+          <h3>摘要</h3>
+          <p className="summary-text">{v.summary || "未填写"}</p>
+          {v.cover ? (
+            <AssetImage src={v.cover} alt="内容封面" className="detail-cover" />
+          ) : null}
+          {v.sourceUrl ? (
+            <a href={v.sourceUrl} target="_blank" rel="noreferrer">
+              查看来源原文
+            </a>
+          ) : null}
+          <div className="actions">
+            {editable ? <Button onClick={openEdit}>编辑内容信息</Button> : null}
+            {can("void") && asset.lifecycle === "正常" ? (
+              <Button variant="danger" onClick={() => setModal("void")}>
+                作废内容
+              </Button>
+            ) : null}
+          </div>
+        </Dialog>
+      ) : null}
+      {modal === "approval-info" ? (
+        <Dialog drawer title="审批信息" onClose={() => setModal("")}>
+          <Badge>{approvalLabel(v.approval)}</Badge>
+          {v.approval.snapshot ? (
+            <>
+              <dl className="detail-meta">
+                <dt>审批编号</dt>
+                <dd>{v.approval.snapshot.number}</dd>
+                <dt>有效期</dt>
+                <dd>{v.approval.snapshot.expiry}</dd>
+                <dt>OCR 核对</dt>
+                <dd>
+                  {ocrWarnings(v.approval.snapshot).length
+                    ? v.approval.snapshot.confirmed
+                      ? "存在差异 · 已人工确认"
+                      : "存在差异"
+                    : "一致"}
+                </dd>
+              </dl>
+              {can("evidence") && shot ? (
+                <button
+                  className="approval-shot-button"
+                  onClick={() => setModal("evidence")}
+                >
+                  <AssetImage
+                    src={shot.fileKey ? "local:" + shot.fileKey : shot.url}
+                    alt="审批截图"
+                    className="approval-read-image"
+                  />
+                </button>
+              ) : null}
+              {v.approval.snapshot.confirmation ? (
+                <p className="inline-warning">
+                  {v.approval.snapshot.confirmation}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="summary-text">
+              {v.approval.mode === "exempt"
+                ? "此内容无需登记审批信息。"
+                : "请补充审批信息，或按权限选择无需登记。"}
+            </p>
+          )}
+          {editable ? (
+            <Button onClick={() => setModal("approval")}>
+              {v.approval.mode === "registered"
+                ? "修改审批信息"
+                : "设置审批信息"}
             </Button>
           ) : null}
-        </Note>
+        </Dialog>
       ) : null}
-      {asset.voidReason ? (
-        <Note tone="amber">
-          作废原因：{asset.voidReason}。历史记录保留可查。
-        </Note>
+      {modal === "approval" ? (
+        <ApprovalEditor assetIds={[id]} onClose={() => setModal("")} />
       ) : null}
-      <div className="detail-workspace">
-        <section className="panel document-panel">
-          <div className="document-heading">
-            <div>
-              <FileText size={18} />
-              <strong>内容预览</strong>
-              <span>{v.kind}</span>
-            </div>
-            <button
-              className="icon-btn"
-              aria-label="全屏预览"
-              onClick={() => {
-                void preview.current?.requestFullscreen();
-              }}
-            >
-              <Maximize size={17} />
-            </button>
-          </div>
-          <div className="document-body">
-            <div className="preview-surface" ref={preview}>
-              {fileError ? (
-                <Empty
-                  title="文件暂时无法预览"
-                  description={fileError}
-                  action={
-                    <Button onClick={() => go("upload?asset=" + asset.id)}>
-                      重新上传
-                    </Button>
-                  }
-                />
-              ) : v.kind === "视频" ? (
-                url ? (
-                  <video className="video-preview" controls src={url} />
-                ) : (
-                  <Empty
-                    title="示例视频未提供原文件"
-                    description="可以上传真实视频，或在新增内容中添加自动生成的演示视频。转码进度为模拟处理。"
-                    action={
-                      can("upload") ? (
-                        <Button onClick={() => go("upload?asset=" + asset.id)}>
-                          上传原视频
-                        </Button>
-                      ) : null
-                    }
-                  />
-                )
-              ) : v.kind === "图片" ? (
-                url ? (
-                  <img className="image-preview" src={url} alt={v.title} />
-                ) : (
-                  <Empty title="图片暂不可用" />
-                )
-              ) : v.kind === "网页" ? (
-                <article
-                  className="article-preview"
-                  style={{ fontSize: `${zoom}%` }}
-                >
-                  <div className="article-eyebrow">{v.source} / 内容转存</div>
-                  <h2>{v.title}</h2>
-                  {v.cover ? <AssetImage src={v.cover} alt="网页封面" /> : null}
-                  {v.sourceUrl ? (
-                    <Note tone="amber">
-                      本地原型未实际抓取原站内容，以下为已保存的安全文本或登记说明。
-                    </Note>
-                  ) : v.fileKey ? (
-                    <Note>
-                      HTML
-                      采用安全文本预览，原始文件完整保存；外链图片及脚本不加载。
-                    </Note>
-                  ) : (
-                    <small className="muted">
-                      公众号采集演示内容，非真实文章。
-                    </small>
-                  )}
-                  {v.content.map((paragraph, i) => (
-                    <p
-                      key={i}
-                      className={
-                        search && paragraph.includes(search)
-                          ? "search-highlight"
-                          : ""
-                      }
-                    >
-                      {paragraph}
-                    </p>
-                  ))}
-                </article>
-              ) : url && (v.kind === "PDF" || v.previewUrl) ? (
-                <div className="pdf-frame-wrap">
-                  {v.previewUrl ? (
-                    <span className="pdf-copy-label">
-                      示例 PDF 预览副本 · 原示例 {v.kind} 文件可下载
-                    </span>
-                  ) : null}
-                  <iframe
-                    title="文档只读预览"
-                    src={`${url}#page=${page}&view=FitH&navpanes=0${zoom === 100 ? "" : `&zoom=${zoom}`}`}
-                  />
-                </div>
-              ) : v.fileKey && (v.kind === "PPT" || v.kind === "Word") ? (
-                <Empty
-                  title="此格式暂不支持本地在线预览"
-                  description="原文件已完整保存，可下载查看。示例 PPT 和 Word 提供独立 PDF 预览副本。"
-                  action={<Button onClick={original}>下载原文件</Button>}
-                />
-              ) : (
-                <Empty
-                  title="正在准备预览"
-                  description="文件加载完成后会显示在这里。"
-                />
-              )}
-            </div>
-          </div>
-          <div className="preview-controls">
-            <button
-              className="icon-btn"
-              aria-label="前一页"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <input
-              aria-label="跳转页码"
-              type="number"
-              min={1}
-              max={v.pages}
-              value={page}
-              onChange={(e) =>
-                setPage(
-                  Math.min(v.pages, Math.max(1, Number(e.target.value) || 1)),
-                )
-              }
-            />
-            <span>/ {v.pages}</span>
-            <button
-              className="icon-btn"
-              aria-label="后一页"
-              disabled={page >= v.pages}
-              onClick={() => setPage(page + 1)}
-            >
-              <ChevronRight size={16} />
-            </button>
-            <i />
-            <button
-              className="icon-btn"
-              aria-label="缩小"
-              disabled={zoom <= 50}
-              onClick={() => setZoom(zoom - 10)}
-            >
-              <ZoomOut size={16} />
-            </button>
-            <span>{zoom === 100 ? "适应宽度" : `${zoom}%`}</span>
-            <button
-              className="icon-btn"
-              aria-label="放大"
-              disabled={zoom >= 180}
-              onClick={() => setZoom(zoom + 10)}
-            >
-              <ZoomIn size={16} />
-            </button>
-            {v.kind === "网页" ? (
-              <div className="preview-search">
-                <Search size={14} />
-                <input
-                  aria-label="文内搜索"
-                  placeholder="文内搜索"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-            ) : (
-              <small className="muted">PDF 搜索可使用预览工具栏</small>
-            )}
-          </div>
-        </section>
-        <aside className="panel detail-info">
-          <Tabs
-            items={[
-              { key: "basic", label: "信息" },
-              { key: "tags", label: "标签" },
-              { key: "approval", label: "审批" },
-            ]}
-            value={tab}
-            onChange={setTab}
-          />
-          <div className="detail-info-body">
-            {tab === "basic" ? (
-              <>
-                <div className="section-heading">
-                  <h3>基本信息</h3>
-                  {editAllowed ? (
-                    <button
-                      className="icon-btn"
-                      aria-label="编辑内容信息"
-                      onClick={() => {
-                        setEditTitle(v.title);
-                        setEditSummary(v.summary);
-                        setEditAuthor(v.author || "");
-                        setEditCover(v.cover || "");
-                        setEditThumbnail(v.thumbnail || "");
-                        setEditExpiry(v.expiry || "");
-                        setModal("edit");
-                      }}
-                    >
-                      <Edit3 size={16} />
-                    </button>
-                  ) : null}
-                </div>
-                <dl className="detail-meta">
-                  <dt>内容编号</dt>
-                  <dd className="mono">{asset.code}</dd>
-                  <dt>内容类型</dt>
-                  <dd>{v.kind}</dd>
-                  <dt>当前查看</dt>
-                  <dd>
-                    V{v.number}.0 {historical ? "（历史）" : "（当前）"}
-                  </dd>
-                  <dt>内容来源</dt>
-                  <dd>{v.source}</dd>
-                  <dt>审批登记</dt>
-                  <dd>
-                    <Badge>{approvalLabel(v.approval)}</Badge>
-                  </dd>
-                  <dt>有效期</dt>
-                  <dd>{v.approval.snapshot?.expiry || v.expiry || "未设置"}</dd>
-                  <dt>归档时间</dt>
-                  <dd>{dateLabel(v.createdAt)}</dd>
-                  {v.sourcePublished ? (
-                    <>
-                      <dt>原文发布时间</dt>
-                      <dd>{v.sourcePublished}</dd>
-                    </>
-                  ) : null}
-                </dl>
-                <h3 className="subsection-title">内容摘要</h3>
-                <p className="summary-text">{v.summary || "未填写摘要"}</p>
-                {v.cover ? (
-                  <>
-                    <h3 className="subsection-title">封面与缩略图</h3>
-                    <AssetImage
-                      className="detail-cover"
-                      src={v.cover}
-                      alt="封面展示"
-                    />
-                  </>
-                ) : null}
-                {v.sourceUrl ? (
-                  <a
-                    className="text-link"
-                    href={v.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    查看原文
-                    <ExternalLink size={14} />
-                  </a>
-                ) : null}
-                <div className="detail-secondary-actions">
-                  <Button variant="ghost" onClick={() => setModal("audit")}>
-                    查看操作记录
-                  </Button>
-                  {can("void") && asset.lifecycle === "正常" ? (
-                    <Button variant="danger" onClick={() => setModal("void")}>
-                      <ArchiveX size={14} />
-                      作废内容
-                    </Button>
-                  ) : null}
-                </div>
-              </>
-            ) : tab === "tags" ? (
-              <>
-                <div className="section-heading">
-                  <h3>智能标签</h3>
-                  <Badge>{v.tagStatus}</Badge>
-                </div>
-                <div className="segmented">
-                  <button
-                    className={scope === "material" ? "active" : ""}
-                    onClick={() => setScope("material")}
-                  >
-                    材料级
-                  </button>
-                  <button
-                    className={scope === "page" ? "active" : ""}
-                    onClick={() => setScope("page")}
-                  >
-                    当前页 · {page}
-                  </button>
-                </div>
-                {v.unmatched ? (
-                  <Note tone="amber">
-                    {v.unmatched}
-                    <button
-                      className="text-link"
-                      onClick={() => go("tags?tab=suggestions")}
-                    >
-                      查看增补建议
-                    </button>
-                  </Note>
-                ) : null}
-                {[
-                  "产品 / 品牌",
-                  "产品线",
-                  "疾病领域",
-                  "目标受众",
-                  "Key Message",
-                  "页面类型",
-                  "证据类型",
-                ].map((group) => {
-                  const bindings = tagBindings.filter(
-                    (t) =>
-                      state.tags.find((tag) => tag.id === t.tagId)?.group ===
-                      group,
-                  );
-                  return bindings.length ? (
-                    <div className="detail-tag-group" key={group}>
-                      <h4>{group}</h4>
-                      {bindings.map((binding, i) => (
-                        <span
-                          className={`editable-tag ${binding.origin === "人工" ? "manual" : ""}`}
-                          key={binding.tagId + i}
-                        >
-                          {state.tags.find((t) => t.id === binding.tagId)?.name}
-                          <small>{binding.origin}</small>
-                          {tagAllowed ? (
-                            <button
-                              aria-label={`移除标签${state.tags.find((t) => t.id === binding.tagId)?.name}`}
-                              onClick={() =>
-                                mutate(
-                                  (version) => {
-                                    if (version)
-                                      version.tags = version.tags.filter(
-                                        (t) =>
-                                          !(
-                                            t.tagId === binding.tagId &&
-                                            t.page === binding.page
-                                          ),
-                                      );
-                                  },
-                                  "移除标签",
-                                  binding.tagId,
-                                )
-                              }
-                            >
-                              <X size={12} />
-                            </button>
-                          ) : null}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null;
-                })}
-                {!tagBindings.length ? (
-                  <p className="muted">
-                    此范围暂无标签。AI 正常匹配的标签无需逐条确认。
-                  </p>
-                ) : null}
-                {tagAllowed ? (
-                  <Button
-                    className="full-width"
-                    icon={<Plus size={15} />}
-                    onClick={() => {
-                      setTagId("");
-                      setModal("tag");
-                    }}
-                  >
-                    从标准标签池添加
-                  </Button>
-                ) : null}
-                <div className="tag-legend">
-                  <span>AI 自动识别</span>
-                  <span>人工校正 · 重跑默认保留</span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="section-heading">
-                  <h3>审批信息</h3>
-                  <Badge>{approvalLabel(v.approval)}</Badge>
-                </div>
-                {v.approval.mode === "registered" && v.approval.snapshot ? (
-                  <>
-                    <div className="credential-stamp">
-                      <ShieldCheck size={26} />
-                      <small>
-                        审批凭证 / 修订 {v.approval.snapshot.revision}
-                      </small>
-                      <strong>{v.approval.snapshot.number}</strong>
-                      <p>{v.approval.snapshot.title || "未登记材料包标题"}</p>
-                      <div>
-                        <span>有效至 {v.approval.snapshot.expiry}</span>
-                        <span>
-                          {v.approval.snapshot.evidence.length} 张截图
-                        </span>
-                      </div>
-                    </div>
-                    {ocrWarnings(v.approval.snapshot).length ? (
-                      <Note tone="amber">
-                        原始 OCR 存在异常。
-                        {v.approval.snapshot.confirmed
-                          ? "已人工确认，识别差异仍保留。"
-                          : "请核对原审批单。"}
-                        <p>{v.approval.snapshot.confirmation}</p>
-                      </Note>
-                    ) : (
-                      <Badge tone="green">编号与截图识别一致</Badge>
-                    )}
-                    {can("evidence") ? (
-                      <div className="detail-evidence-grid">
-                        {v.approval.snapshot.evidence.map((e) => (
-                          <button
-                            key={e.id}
-                            onClick={() => {
-                              setModal("evidence");
-                            }}
-                          >
-                            <ShieldCheck size={17} />
-                            {e.name}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="muted">当前角色没有审批截图查看权限。</p>
-                    )}
-                    <Button
-                      className="full-width"
-                      onClick={() =>
-                        go("credentials?open=" + v.approval.credentialId)
-                      }
-                    >
-                      查看凭证及校验记录
-                    </Button>
-                  </>
-                ) : (
-                  <div className="approval-empty">
-                    <ShieldCheck size={35} />
-                    <h3>
-                      {v.approval.mode === "exempt"
-                        ? "无需登记审批信息"
-                        : "审批信息待补充"}
-                    </h3>
-                    <p>
-                      {v.approval.mode === "exempt"
-                        ? "不要求编号、截图和 OCR；有效期可独立设置。"
-                        : "内容已经保存，请关联审批凭证或由有权限的人选择免登记。"}
-                    </p>
-                  </div>
-                )}
-                {editAllowed ? (
-                  <div className="approval-detail-actions">
-                    <Button
-                      icon={<ShieldCheck size={15} />}
-                      onClick={() => {
-                        setCredentialId("");
-                        setModal("associate");
-                      }}
-                    >
-                      {v.approval.mode === "registered"
-                        ? "更换关联凭证"
-                        : "关联审批凭证"}
-                    </Button>
-                    {can("exempt") && v.approval.mode !== "exempt" ? (
-                      <Button
-                        variant="ghost"
-                        onClick={() => setModal("exempt")}
-                      >
-                        免登记审批信息
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-        </aside>
-      </div>
       {modal === "export" ? (
         <ExportDialog
           assets={[asset]}
-          versions={{ [asset.id]: number }}
+          versions={{ [id]: v.number }}
           onClose={() => setModal("")}
         />
-      ) : modal === "history" ? (
-        <Dialog title="版本历史" wide onClose={() => setModal("")}>
+      ) : null}
+      {modal === "history" ? (
+        <Dialog drawer title="版本历史" onClose={() => setModal("")}>
           <div className="version-timeline">
             {[...asset.versions].reverse().map((version) => (
               <div key={version.number}>
                 <span className="version-marker">V{version.number}.0</span>
                 <section>
-                  <div>
-                    <h3>{version.title}</h3>
-                    {version.number === asset.current ? (
-                      <Badge tone="blue">当前版本</Badge>
-                    ) : null}
-                  </div>
-                  <p>{version.changeNote || "内容归档"}</p>
-                  <small>
-                    {dateLabel(version.createdAt)} ·{" "}
-                    {version.approval.snapshot?.number ||
-                      approvalLabel(version.approval)}
-                  </small>
+                  <h3>{version.title}</h3>
+                  <p>{version.changeNote || "归档内容"}</p>
+                  <small>{dateLabel(version.createdAt)}</small>
                   <Button
                     variant="ghost"
                     onClick={() => {
                       setNumber(version.number);
                       setPage(1);
+                      setPageCount(0);
                       setModal("");
                     }}
                   >
@@ -844,156 +615,70 @@ export default function ContentDetail({ id }: { id: string }) {
             ))}
           </div>
         </Dialog>
-      ) : modal === "tag" ? (
+      ) : null}
+      {modal === "edit" ? (
         <Dialog
-          title={`添加${scope === "page" ? "当前页" : "材料级"}标签`}
-          onClose={() => setModal("")}
-          footer={
-            <>
-              <Button onClick={() => setModal("")}>取消</Button>
-              <Button variant="primary" onClick={addTag}>
-                添加标签
-              </Button>
-            </>
-          }
-        >
-          <Field label="标准标签">
-            <select
-              aria-label="选择标准标签"
-              value={tagId}
-              onChange={(e) => setTagId(e.target.value)}
-            >
-              <option value="">搜索并选择正式标签</option>
-              {state.tags
-                .filter((t) => t.enabled)
-                .map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.group} / {t.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Note>
-            添加结果记录为人工校正。标签池之外的建议请在标签管理中审核。
-          </Note>
-        </Dialog>
-      ) : modal === "edit" ? (
-        <Dialog
+          drawer
           title="编辑内容信息"
-          wide
           onClose={() => setModal("")}
           footer={
             <>
               <Button onClick={() => setModal("")}>取消</Button>
-              <Button variant="primary" onClick={saveBasic}>
+              <Button variant="primary" onClick={saveMeta}>
                 保存信息
               </Button>
             </>
           }
         >
           <Field label="内容标题" required>
-            <input
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-            />
+            <input value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <Field label="摘要（选填）">
+          <Field label="摘要">
             <textarea
               rows={3}
-              value={editSummary}
-              onChange={(e) => setEditSummary(e.target.value)}
-            />
-          </Field>
-          <Field label="作者（选填）">
-            <input
-              value={editAuthor}
-              onChange={(e) => setEditAuthor(e.target.value)}
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
             />
           </Field>
           {v.approval.mode === "exempt" ? (
             <Field label="内容有效期（选填）">
               <input
                 type="date"
-                value={editExpiry}
-                onChange={(e) => setEditExpiry(e.target.value)}
+                value={expiry}
+                onChange={(e) => setExpiry(e.target.value)}
               />
             </Field>
           ) : null}
           <Field label="封面（选填）">
-            <CoverPicker
-              value={editCover}
-              label="上传封面"
-              onChange={setEditCover}
-            />
+            <CoverPicker value={cover} onChange={setCover} label="上传封面" />
           </Field>
           <Field label="缩略图（选填）">
             <CoverPicker
-              value={editThumbnail}
+              value={thumbnail}
+              onChange={setThumbnail}
               label="上传缩略图"
-              onChange={setEditThumbnail}
             />
           </Field>
-          <Note>修改信息会记录操作日志，不自动创建新的文件版本。</Note>
         </Dialog>
-      ) : modal === "associate" ? (
-        <Dialog
-          title="关联审批凭证"
-          onClose={() => setModal("")}
-          footer={
-            <>
-              <Button onClick={() => setModal("")}>取消</Button>
-              <Button variant="primary" onClick={associate}>
-                确认关联
-              </Button>
-            </>
-          }
-        >
-          <Note>仅修改当前版本，历史版本的凭证信息保留。</Note>
-          <Field label="审批凭证">
-            <select
-              value={credentialId}
-              onChange={(e) => setCredentialId(e.target.value)}
-            >
-              <option value="">选择已有凭证</option>
-              {state.credentials
-                .filter(
-                  (c) =>
-                    can("admin") ||
-                    c.createdBy === state.userId ||
-                    assets.some((a) =>
-                      a.versions.some((v) => v.approval.credentialId === c.id),
-                    ),
-                )
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {credentialLatest(c).number} · {credentialLatest(c).expiry}
-                  </option>
-                ))}
-            </select>
-          </Field>
-          <Button variant="ghost" onClick={() => go("credentials")}>
-            到审批凭证页登记新凭证
-          </Button>
+      ) : null}
+      {modal === "evidence" && can("evidence") && shot ? (
+        <Dialog title="审批截图与识别结果" wide onClose={() => setModal("")}>
+          <AssetImage
+            src={shot.fileKey ? "local:" + shot.fileKey : shot.url}
+            className="approval-full-image"
+            alt="审批截图"
+          />
+          <dl className="detail-meta">
+            <dt>识别编号</dt>
+            <dd>{shot.number || "无法识别"}</dd>
+            <dt>识别有效期</dt>
+            <dd>{shot.expiry || "无法识别"}</dd>
+            <dt>识别标题</dt>
+            <dd>{shot.title || "无法识别"}</dd>
+          </dl>
         </Dialog>
-      ) : modal === "exempt" ? (
-        <Dialog
-          title="免登记审批信息"
-          onClose={() => setModal("")}
-          footer={
-            <>
-              <Button onClick={() => setModal("")}>取消</Button>
-              <Button variant="primary" onClick={exempt}>
-                确认免登记
-              </Button>
-            </>
-          }
-        >
-          <Note>
-            当前版本不再要求审批编号、截图和
-            OCR。已有操作记录仍然保留，内容有效期可单独设置。
-          </Note>
-        </Dialog>
-      ) : modal === "void" ? (
+      ) : null}
+      {modal === "void" ? (
         <Dialog
           title="作废内容"
           onClose={() => setModal("")}
@@ -1003,10 +688,10 @@ export default function ContentDetail({ id }: { id: string }) {
               <Button
                 variant="danger"
                 onClick={() => {
-                  if (!reason.trim()) return toast("请填写作废原因。");
+                  if (!reason.trim()) return toast("请填写作废原因");
                   update(
                     (s) => {
-                      const a = s.assets.find((a) => a.id === asset.id)!;
+                      const a = s.assets.find((a) => a.id === id)!;
                       a.lifecycle = "已作废";
                       a.voidReason = reason;
                       a.updatedAt = now();
@@ -1022,9 +707,9 @@ export default function ContentDetail({ id }: { id: string }) {
             </>
           }
         >
-          <Note tone="amber">
-            影响整份内容资产，默认正常列表将不再展示。所有历史版本保留。
-          </Note>
+          <p className="dialog-intro">
+            内容不再出现在正常列表中，历史版本仍可查看。
+          </p>
           <Field label="作废原因" required>
             <textarea
               rows={3}
@@ -1033,60 +718,7 @@ export default function ContentDetail({ id }: { id: string }) {
             />
           </Field>
         </Dialog>
-      ) : modal === "audit" ? (
-        <Dialog title="内容操作记录" wide onClose={() => setModal("")}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>人员</th>
-                <th>操作</th>
-                <th>说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.audits
-                .filter((log) => log.object === asset.code)
-                .map((log) => (
-                  <tr key={log.id}>
-                    <td>{dateLabel(log.at)}</td>
-                    <td>{log.user}</td>
-                    <td>{log.action}</td>
-                    <td>{log.detail}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-          {!state.audits.some((log) => log.object === asset.code) ? (
-            <Empty
-              title="暂无独立操作记录"
-              description="后续修改和版本操作会记录在这里。"
-            />
-          ) : null}
-        </Dialog>
-      ) : modal === "evidence" && can("evidence") ? (
-        <Dialog
-          title="审批截图与原始识别结果"
-          wide
-          onClose={() => setModal("")}
-        >
-          <div className="evidence-grid">
-            {v.approval.snapshot?.evidence.map((e) => (
-              <article key={e.id} className="evidence-card">
-                {e.url ? (
-                  <img src={e.url} alt={e.name} />
-                ) : (
-                  <p>截图保存在浏览器，可在凭证详情中查看。</p>
-                )}
-                <strong>{e.name}</strong>
-                <p>识别编号：{e.number || "无法识别"}</p>
-                <p>识别有效期：{e.expiry || "无法识别"}</p>
-                <Badge>{e.status}</Badge>
-              </article>
-            ))}
-          </div>
-        </Dialog>
       ) : null}
-    </>
+    </div>
   );
 }

@@ -1,38 +1,34 @@
+import { moduleForPermission } from "./permissions";
 export type Kind = "PDF" | "PPT" | "Word" | "图片" | "视频" | "网页";
 export type Process = "排队中" | "处理中" | "完成" | "部分失败" | "失败";
 export type Permission =
   | "upload"
   | "edit"
+  | "publish"
+  | "collect"
   | "exempt"
   | "tags"
   | "taxonomy"
-  | "rerun"
   | "void"
   | "export"
   | "evidence"
   | "admin";
 export const permissionNames: Record<Permission, string> = {
   upload: "上传内容",
-  edit: "编辑与关联凭证",
+  edit: "编辑内容与审批",
+  publish: "创建与提交发布",
+  collect: "处理文章更新",
   exempt: "免登记审批",
-  tags: "校正标签",
-  taxonomy: "维护标签库",
-  rerun: "批量重跑",
+  tags: "维护内容标签",
+  taxonomy: "维护标签库与推荐",
   void: "作废内容",
   export: "下载与导出",
-  evidence: "查看与导出审批截图",
-  admin: "用户、角色与审计",
+  evidence: "查看与下载审批截图",
+  admin: "用户与角色管理",
 };
 export const accounts = ["自免医时空", "爱医慢时空", "爱医时空", "爱眼医时空"];
-export const groups = [
-  "产品 / 品牌",
-  "产品线",
-  "疾病领域",
-  "目标受众",
-  "Key Message",
-  "页面类型",
-  "证据类型",
-];
+export const primaryTagId = (name: string) =>
+  `primary-${encodeURIComponent(name)}`;
 export interface Evidence {
   id: string;
   name: string;
@@ -95,6 +91,51 @@ export interface Version {
   expiry?: string;
   unmatched?: string;
   changeNote?: string;
+  pageStates?: Record<
+    number,
+    {
+      status: "待打标" | "打标中" | "完成" | "失败" | "人工完成";
+      error?: string;
+    }
+  >;
+}
+export type PublicationStatus =
+  | "草稿"
+  | "已提交"
+  | "下游处理中"
+  | "待发布"
+  | "已发布"
+  | "处理失败"
+  | "状态待确认";
+export interface Publication {
+  id: string;
+  assetId: string;
+  version: number;
+  title: string;
+  summary: string;
+  cover?: string;
+  thumbnail?: string;
+  snapshot?: Version;
+  submittedBy?: string;
+  replacesId?: string;
+  plannedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+  status: PublicationStatus;
+  error?: string;
+  revision: number;
+  previews: {
+    id: string;
+    platform: string;
+    port: string;
+    url: string;
+    generatedAt: string;
+    version: number;
+    revision: number;
+    status: PublicationStatus;
+    actualAt?: string;
+  }[];
 }
 export interface Asset {
   id: string;
@@ -109,18 +150,18 @@ export interface Asset {
 export interface Tag {
   id: string;
   name: string;
-  group: string;
-  parent?: string;
-  synonyms: string[];
+  parentId: string | null;
   enabled: boolean;
   external: boolean;
 }
 export interface Suggestion {
   id: string;
   name: string;
-  group: string;
+  parentId: string;
   mentions: number;
   assetIds: string[];
+  contexts?: { assetId: string; version: number; page?: number }[];
+  accepted?: { assetId: string; version: number; page?: number }[];
   status: "待处理" | "已采纳" | "已忽略";
 }
 export interface TaskItem {
@@ -133,7 +174,7 @@ export interface TaskItem {
 export interface Task {
   id: string;
   name: string;
-  type: "解析与打标" | "OCR" | "采集" | "标签重跑" | "导出";
+  type: "解析与打标" | "OCR" | "采集" | "导出";
   status: Process;
   items: TaskItem[];
   createdAt: string;
@@ -141,15 +182,9 @@ export interface Task {
   finishAt?: number;
   artifactKey?: string;
   artifactName?: string;
-  conflicts?: {
-    assetId: string;
-    version: number;
-    tagId: string;
-    proposedId: string;
-    resolved?: boolean;
-  }[];
 }
 export interface Article {
+  collectedAt?: string;
   id: string;
   title: string;
   account: string;
@@ -158,6 +193,8 @@ export interface Article {
   status: "成功" | "失败" | "发现更新" | "未变化";
   assetId?: string;
   error?: string;
+  previousVersion?: Version;
+  collectedVersion?: Version;
   before?: string;
   after?: string;
   handled?: boolean;
@@ -167,9 +204,9 @@ export interface Role {
   name: string;
   permissions: Permission[];
   menus: string[];
-  dataRange: "all" | "own";
 }
 export interface User {
+  enabled?: boolean;
   id: string;
   name: string;
   account: string;
@@ -195,7 +232,8 @@ export interface Notice {
   adminOnly?: boolean;
 }
 export interface State {
-  schema: 1;
+  schema: 2;
+  recommendationRevision?: number;
   assets: Asset[];
   credentials: Credential[];
   tags: Tag[];
@@ -207,6 +245,9 @@ export interface State {
   audits: Audit[];
   notices: Notice[];
   userId: string | null;
+  publications?: Publication[];
+  workspaceRevision?: number;
+  administrationRevision?: number;
 }
 export const now = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;
@@ -258,7 +299,7 @@ export function ocrWarnings(revision: CredentialRevision) {
     if (e.expiry && e.expiry !== revision.expiry)
       messages.push(`${e.name}：识别有效期与登记值不一致`);
     if (e.title && revision.title && e.title !== revision.title)
-      messages.push(`${e.name}：材料包标题需人工核对`);
+      messages.push(`${e.name}：审批单标题需人工核对`);
   }
   if (new Set(revision.evidence.map((e) => e.number).filter(Boolean)).size > 1)
     messages.push("多张截图识别出不同编号，请检查是否混入其他凭证");
@@ -269,7 +310,10 @@ export function ocrWarnings(revision: CredentialRevision) {
 export function credentialErrors(revision: CredentialRevision) {
   return [
     !revision.number.trim() && "审批编号必填",
-    !revision.evidence.length && "至少上传一张审批截图",
+    revision.evidence.length !== 1 &&
+      (revision.evidence.length
+        ? "每次只能上传一张审批截图"
+        : "请上传一张审批截图"),
     (!revision.expiry ||
       !/^\d{4}-\d{2}-\d{2}$/.test(revision.expiry) ||
       Number.isNaN(Date.parse(revision.expiry))) &&
@@ -280,7 +324,12 @@ export function credentialErrors(revision: CredentialRevision) {
   ].filter(Boolean) as string[];
 }
 export function canRole(role: Role | undefined, permission: Permission) {
-  return !!role?.permissions.includes(permission);
+  const module = moduleForPermission(permission);
+  return (
+    !!role?.permissions.includes(permission) &&
+    !!module &&
+    role.menus.includes(module.key)
+  );
 }
 export function visibleFor(
   state: State,
@@ -288,9 +337,7 @@ export function visibleFor(
   role: Role | undefined,
 ) {
   if (!user || !role) return [];
-  return role.dataRange === "all"
-    ? state.assets
-    : state.assets.filter((a) => a.ownerId === user.id);
+  return state.assets;
 }
 declare global {
   interface Window {
