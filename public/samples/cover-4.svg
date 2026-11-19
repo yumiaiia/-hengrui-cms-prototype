@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+  <title id="title">研究证据 · 虚构证据整理示例</title>
+  <desc id="desc">浅蓝色封面，右侧抽象柱形图和趋势线仅作装饰，不代表真实临床结果。</desc>
+  <rect width="1200" height="600" fill="#f0f5fa"/>
+  <path d="M751 0H1200V600H915Z" fill="#e3eef5"/>
+  <g transform="translate(800 136)">
+    <path d="M0 0V306H328" stroke="#8bafc4" stroke-width="2" fill="none"/>
+    <g stroke="#c5d8e3"><path d="M0 61H328M0 122H328M0 183H328M0 244H328"/></g>
+    <rect x="34" y="206" width="46" height="100" rx="3" fill="#8eb7ce"/>
+    <rect x="112" y="146" width="46" height="160" rx="3" fill="#649ebc"/>
+    <rect x="190" y="111" width="46" height="195" rx="3" fill="#407f9f"/>
+    <rect x="268" y="64" width="46" height="242" rx="3" fill="#246582"/>
+    <path d="M57 176L135 108L213 75L291 26" fill="none" stroke="#35a0ae" stroke-width="3"/>
+    <g fill="#f0f5fa" stroke="#35a0ae" stroke-width="3"><circle cx="57" cy="176" r="6"/><circle cx="135" cy="108" r="6"/><circle cx="213" cy="75" r="6"/><circle cx="291" cy="26" r="6"/></g>
+  </g>
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <rect x="72" y="68" width="6" height="24" rx="2" fill="#3294a6"/>
+    <text x="92" y="88" fill="#607f94" font-size="19" letter-spacing="3">EVIDENCE REVIEW · 04</text>
+    <text x="72" y="223" fill="#193e60" font-size="68" font-weight="600" letter-spacing="6">研究证据</text>
+    <text x="76" y="285" fill="#3b607a" font-size="28">证据整理与图表呈现</text>
+    <path d="M76 324H138" stroke="#3294a6" stroke-width="3"/>
+    <text x="76" y="371" fill="#57778d" font-size="20">文献索引 · 数据标注 · 审阅记录</text>
+    <text x="76" y="408" fill="#57778d" font-size="18">抽象图表仅用于视觉展示，无临床含义</text>
+    <path d="M72 509H1128" stroke="#adc7d6"/>
+    <text x="76" y="550" fill="#496d85" font-size="17">演示内容 / 非真实证据 / 不构成医学建议</text>
+    <text x="1128" y="550" fill="#496d85" font-size="17" text-anchor="end">DEMO · 2026</text>
+  </g>
+</svg>

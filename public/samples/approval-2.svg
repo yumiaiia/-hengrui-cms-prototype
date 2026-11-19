@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1250" viewBox="0 0 1000 1250" role="img" aria-labelledby="title desc">
+  <title id="title">演示审批凭证 APP-DEMO-001 第 2 页，共 2 页</title>
+  <desc id="desc">与 approval-1 同一份肿瘤学术材料包演示审批凭证的附件页，有效期至 2027-06-30。清单与流程记录均为虚构，不含真实敏感信息。</desc>
+  <rect width="1000" height="1250" fill="#eff4f8"/>
+  <rect x="40" y="40" width="920" height="1170" rx="8" fill="#fff" stroke="#cedce5"/>
+  <path d="M40 48Q40 40 48 40H952Q960 40 960 48V144H40Z" fill="#183d5e"/>
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <text x="84" y="91" fill="#bcd6e3" font-size="16" letter-spacing="3">FICTIONAL CONTENT REVIEW</text>
+    <text x="84" y="123" fill="#fff" font-size="24" font-weight="600">演示审批凭证</text>
+    <text x="916" y="120" fill="#bcd6e3" font-size="18" text-anchor="end">02 / 02</text>
+    <rect x="84" y="180" width="832" height="72" rx="5" fill="#edf6f8" stroke="#c5e0e7"/>
+    <text x="108" y="210" fill="#26677d" font-size="19" font-weight="600">仅供 CMS 原型演示，无实际审批效力</text>
+    <text x="108" y="236" fill="#577889" font-size="16">本页为 APP-DEMO-001 的组成部分，须与第 1 页共同阅读。</text>
+    <text x="84" y="321" fill="#193e60" font-size="36" font-weight="600">肿瘤学术材料包</text>
+    <text x="84" y="360" fill="#728b9c" font-size="18">附件页 / 清单与演示审阅记录</text>
+    <path d="M84 392H916" stroke="#d5e1e8"/>
+    <text x="84" y="432" fill="#526f83" font-size="19">凭证编号：APP-DEMO-001</text>
+    <text x="916" y="432" fill="#526f83" font-size="19" text-anchor="end">有效期至：2027-06-30</text>
+    <text x="84" y="488" fill="#193e60" font-size="23" font-weight="600">材料附件清单（虚构）</text>
+    <rect x="84" y="511" width="832" height="52" fill="#e9f1f6"/>
+    <rect x="84" y="563" width="832" height="174" fill="#fafcfd" stroke="#d5e1e8"/>
+    <path d="M84 621H916M84 679H916M370 511V737M678 511V737" stroke="#d5e1e8"/>
+    <g font-size="18" fill="#3a5b73">
+      <text x="106" y="545" font-weight="600">附件名称</text><text x="392" y="545" font-weight="600">演示文件</text><text x="700" y="545" font-weight="600">版本</text>
+      <text x="106" y="600">学术材料预览</text><text x="392" y="600">sample.pdf</text><text x="700" y="600">DEMO v1.0</text>
+      <text x="106" y="658">学术分享演示稿</text><text x="392" y="658">sample.pptx</text><text x="700" y="658">DEMO v1.0</text>
+      <text x="106" y="716">内容整理文档</text><text x="392" y="716">sample.docx</text><text x="700" y="716">DEMO v1.0</text>
+    </g>
+    <text x="84" y="793" fill="#193e60" font-size="23" font-weight="600">演示流程记录</text>
+    <path d="M98 830V953" stroke="#c8dde6" stroke-width="3"/>
+    <g fill="#428da2"><circle cx="98" cy="834" r="6"/><circle cx="98" cy="889" r="6"/><circle cx="98" cy="944" r="6"/></g>
+    <g fill="#526f83" font-size="18">
+      <text x="124" y="841">2026-11-17 · 演示节点 A · 格式与附件完整性检查</text>
+      <text x="124" y="896">2026-11-18 · 演示节点 B · 演示声明与版本信息检查</text>
+      <text x="124" y="951">2026-11-19 · 演示节点 C · 生成虚构流程完成记录</text>
+    </g>
+    <rect x="84" y="992" width="832" height="85" rx="5" fill="#f4f7fa"/>
+    <text x="108" y="1025" fill="#658296" font-size="17">以上节点为虚构角色，不对应任何真实审批人员。</text>
+    <text x="108" y="1053" fill="#658296" font-size="16">本凭证仅用于原型演示，不得用于真实发布或医学决策。</text>
+    <path d="M84 1120H916" stroke="#d5e1e8"/>
+    <text x="84" y="1161" fill="#7890a0" font-size="16">APP-DEMO-001 · 肿瘤学术材料包 · 有效期至 2027-06-30</text>
+    <text x="916" y="1187" fill="#7890a0" font-size="15" text-anchor="end">第 2 页 / 共 2 页 · 演示审批凭证</text>
+  </g>
+</svg>

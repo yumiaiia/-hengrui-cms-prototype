@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+  <title id="title">学术资讯 · 肿瘤学术材料包演示封面</title>
+  <desc id="desc">蓝青色编辑风格封面，右侧抽象圆形与连接线。全部内容为虚构演示，不代表真实研究或医学建议。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#102e52"/><stop offset="1" stop-color="#174d6a"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#fff" stroke-opacity=".035"/></pattern>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <rect width="1200" height="600" fill="url(#grid)"/>
+  <g fill="none" stroke="#70d2de"><circle cx="952" cy="296" r="168" stroke-opacity=".24"/><circle cx="952" cy="296" r="128" stroke-opacity=".16"/><circle cx="952" cy="296" r="86" stroke-opacity=".35"/>
+    <path d="M800 225L953 296L1084 205M953 296L1020 421M953 296L824 401" stroke-width="2" stroke-opacity=".5"/>
+  </g>
+  <g fill="#8ddce5"><circle cx="800" cy="225" r="9"/><circle cx="953" cy="296" r="16"/><circle cx="1084" cy="205" r="8"/><circle cx="1020" cy="421" r="9"/><circle cx="824" cy="401" r="7"/></g>
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <rect x="72" y="68" width="6" height="24" rx="2" fill="#77d5df"/>
+    <text x="92" y="88" fill="#b5d3df" font-size="19" letter-spacing="3">ACADEMIC BRIEF · 01</text>
+    <text x="72" y="223" fill="#fff" font-size="68" font-weight="600" letter-spacing="6">学术资讯</text>
+    <text x="76" y="285" fill="#d3e6ed" font-size="28">肿瘤学术材料包</text>
+    <path d="M76 324H138" stroke="#77d5df" stroke-width="3"/>
+    <text x="76" y="371" fill="#adcbd8" font-size="20">信息整理 · 内容审阅 · 版本追踪</text>
+    <text x="76" y="408" fill="#adcbd8" font-size="18">面向内容管理流程的虚构学术示例</text>
+    <path d="M72 509H1128" stroke="#fff" stroke-opacity=".18"/>
+    <text x="76" y="550" fill="#b9d8e3" font-size="17">演示内容 / 非真实研究 / 不构成医学建议</text>
+    <text x="1128" y="550" fill="#b9d8e3" font-size="17" text-anchor="end">DEMO · 2026</text>
+  </g>
+</svg>

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1250" viewBox="0 0 1000 1250" role="img" aria-labelledby="title desc">
+  <title id="title">演示审批凭证 APP-DEMO-002 · 学术指南解读资料包</title>
+  <desc id="desc">另一份独立的虚构演示审批凭证，有效期至 2026-12-07，无真实机构、公章、签名或敏感信息，无实际审批效力。</desc>
+  <rect width="1000" height="1250" fill="#eff4f8"/>
+  <rect x="40" y="40" width="920" height="1170" rx="8" fill="#fff" stroke="#cedce5"/>
+  <path d="M40 48Q40 40 48 40H952Q960 40 960 48V144H40Z" fill="#23586c"/>
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <text x="84" y="91" fill="#c6e1e8" font-size="16" letter-spacing="3">FICTIONAL CONTENT REVIEW</text>
+    <text x="84" y="123" fill="#fff" font-size="24" font-weight="600">演示审批凭证</text>
+    <text x="916" y="120" fill="#c6e1e8" font-size="18" text-anchor="end">01 / 01</text>
+    <rect x="84" y="180" width="832" height="72" rx="5" fill="#edf6f8" stroke="#c5e0e7"/>
+    <text x="108" y="210" fill="#26677d" font-size="19" font-weight="600">仅供 CMS 原型演示，无实际审批效力</text>
+    <text x="108" y="236" fill="#577889" font-size="16">独立演示凭证，与 APP-DEMO-001 不属于同一份文件。</text>
+    <text x="84" y="321" fill="#193e60" font-size="36" font-weight="600">学术指南解读资料包</text>
+    <text x="84" y="360" fill="#728b9c" font-size="18">材料信息 / 演示范围与使用限制</text>
+    <path d="M84 392H916" stroke="#d5e1e8"/>
+    <g font-size="20">
+      <text x="84" y="441" fill="#6c8294">凭证编号</text><text x="320" y="441" fill="#183d5e" font-weight="600">APP-DEMO-002</text>
+      <text x="84" y="502" fill="#6c8294">材料标题</text><text x="320" y="502" fill="#183d5e">学术指南解读资料包</text>
+      <text x="84" y="563" fill="#6c8294">材料版本</text><text x="320" y="563" fill="#183d5e">DEMO v1.0</text>
+      <text x="84" y="624" fill="#6c8294">演示签发日期</text><text x="320" y="624" fill="#183d5e">2026-11-19</text>
+      <text x="84" y="685" fill="#6c8294">有效期至</text><text x="320" y="685" fill="#183d5e" font-weight="600">2026-12-07</text>
+      <text x="84" y="746" fill="#6c8294">演示状态</text><text x="320" y="746" fill="#26677d">已通过（虚构流程状态）</text>
+    </g>
+    <path d="M84 782H916" stroke="#d5e1e8"/>
+    <text x="84" y="827" fill="#193e60" font-size="23" font-weight="600">演示范围与限制</text>
+    <g fill="#526f83" font-size="18">
+      <text x="84" y="872">用途：演示指南分类、资料索引、版本与有效期展示。</text>
+      <text x="84" y="909">所有内容均为虚构，不引用真实指南结论或治疗建议。</text>
+      <text x="84" y="946">无真实审批人员、真实机构、公章、签名或核验链接。</text>
+    </g>
+    <rect x="84" y="992" width="832" height="85" rx="5" fill="#f4f7fa"/>
+    <text x="108" y="1025" fill="#658296" font-size="17">DEMO ONLY · 非正式文件 · 不得用于真实业务审批</text>
+    <text x="108" y="1053" fill="#658296" font-size="16">本示例不代表任何医疗监管部门或企业的批准、授权或背书。</text>
+    <path d="M84 1120H916" stroke="#d5e1e8"/>
+    <text x="84" y="1161" fill="#7890a0" font-size="16">APP-DEMO-002 · 学术指南解读资料包 · 有效期至 2026-12-07</text>
+    <text x="916" y="1187" fill="#7890a0" font-size="15" text-anchor="end">第 1 页 / 共 1 页 · 演示审批凭证</text>
+  </g>
+</svg>

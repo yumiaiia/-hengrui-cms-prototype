@@ -1,0 +1,104 @@
+button,
+a,
+input,
+select,
+textarea {
+  scroll-margin-top: 95px;
+  scroll-margin-bottom: 85px;
+}
+.dialog-drawer {
+  height: calc(100vh - 24px);
+  max-height: none;
+  max-width: 540px;
+  margin-left: auto;
+  margin-right: 0;
+}
+.empty + .btn {
+  margin-top: 15px;
+}
+.panel > .section-heading {
+  padding: 20px 23px;
+  margin-bottom: 0;
+}
+.panel > .form-grid {
+  padding: 20px 23px;
+}
+.title-edit:hover {
+  border-color: #e2ebf7 !important;
+}
+.registration-list .title-edit {
+  width: 100%;
+}
+.source-link {
+  word-break: break-all;
+}
+.note .btn {
+  height: 28px;
+  font-size: 10px;
+  margin-left: auto;
+}
+.approval-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 16px;
+}
+.approval-choice > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #e5edf7;
+  border-radius: 7px;
+  padding: 12px;
+  font-size: 11px;
+  color: #6483ab;
+  cursor: pointer;
+}
+.approval-choice input {
+  margin-top: 2px;
+}
+.approval-choice small {
+  display: block;
+  font-size: 9px;
+  color: #97abc3;
+  margin-top: 6px;
+}
+.check-list + .field {
+  margin-top: 24px;
+}
+.cover-upload-line {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 13px;
+}
+.cover-upload-line .btn {
+  height: 31px;
+  font-size: 11px;
+}
+.custom-cover-preview {
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+  background: #f4f8fd;
+  border-radius: 7px;
+  margin-bottom: 13px;
+}
+.image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #93abc7;
+  background: #f0f6fc;
+  padding: 16px;
+  font-size: 10px;
+}
+.muted {
+  color: #7b8fa7;
+}
+.page-header p {
+  color: #7f93ac;
+}
+.queue-card > p {
+  color: #8095ae;
+}

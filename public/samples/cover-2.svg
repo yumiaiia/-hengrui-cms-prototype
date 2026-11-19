@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+  <title id="title">指南解读 · 虚构学术指南解读资料包</title>
+  <desc id="desc">浅蓝色学术编辑封面，右侧为抽象书页与索引线，不含真实指南名称或医学建议。</desc>
+  <rect width="1200" height="600" fill="#edf4f8"/>
+  <rect x="718" width="482" height="600" fill="#dfeef3"/>
+  <circle cx="992" cy="280" r="204" fill="none" stroke="#9bc7d4" stroke-width="1"/>
+  <g transform="translate(798 135)">
+    <path d="M0 12Q72 -12 156 18V285Q83 258 0 280Z" fill="#fff" stroke="#9bbaca" stroke-width="2"/>
+    <path d="M156 18Q233 -12 310 12V280Q231 258 156 285Z" fill="#f5fbfc" stroke="#9bbaca" stroke-width="2"/>
+    <path d="M156 18V285" stroke="#44839c" stroke-width="2"/>
+    <g stroke="#9fc4d1" stroke-width="3"><path d="M25 65L128 69M25 99L128 103M25 133L128 137M25 167L105 171M185 69L285 65M185 103L285 99M185 137L285 133M185 171L264 167"/></g>
+    <path d="M248 11V90L264 77L280 90V11" fill="#2d8298"/>
+  </g>
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <rect x="72" y="68" width="6" height="24" rx="2" fill="#328da2"/>
+    <text x="92" y="88" fill="#577d93" font-size="19" letter-spacing="3">GUIDELINE INSIGHT · 02</text>
+    <text x="72" y="223" fill="#163a5c" font-size="68" font-weight="600" letter-spacing="6">指南解读</text>
+    <text x="76" y="285" fill="#355d77" font-size="28">结构化阅读与内容整理</text>
+    <path d="M76 324H138" stroke="#328da2" stroke-width="3"/>
+    <text x="76" y="371" fill="#57768a" font-size="20">主题索引 · 要点归纳 · 来源记录</text>
+    <text x="76" y="408" fill="#57768a" font-size="18">仅演示资料分类与审阅流程</text>
+    <path d="M72 509H1128" stroke="#a6c2d0"/>
+    <text x="76" y="550" fill="#496d82" font-size="17">演示内容 / 非真实指南 / 不构成医学建议</text>
+    <text x="1128" y="550" fill="#496d82" font-size="17" text-anchor="end">DEMO · 2026</text>
+  </g>
+</svg>

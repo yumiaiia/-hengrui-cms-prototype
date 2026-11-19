@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title desc">
+  <title id="title">产品资料 · 虚构内容资料集封面</title>
+  <desc id="desc">蓝青色封面，抽象文档卡片代表资料管理，不含真实产品、疗效或药品信息。</desc>
+  <defs><linearGradient id="bg" x2="1" y2="0"><stop stop-color="#14415d"/><stop offset="1" stop-color="#216b7d"/></linearGradient></defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <path d="M694 0L994 600M811 0L1111 600M928 0L1228 600" stroke="#fff" stroke-opacity=".05" stroke-width="50"/>
+  <g transform="translate(798 116)">
+    <rect x="42" y="0" width="238" height="305" rx="10" fill="#d5e8ee" opacity=".17" transform="rotate(8 161 152)"/>
+    <rect x="12" y="26" width="238" height="305" rx="10" fill="#d5e8ee" opacity=".35" transform="rotate(-5 131 178)"/>
+    <rect x="25" y="37" width="238" height="305" rx="10" fill="#f0f8fa"/>
+    <rect x="53" y="65" width="49" height="49" rx="6" fill="#d4eaf0"/>
+    <path d="M64 89H91M77 76V102" stroke="#32879d" stroke-width="3"/>
+    <path d="M119 79H230M119 97H211M53 146H232M53 170H232M53 194H194" stroke="#a0c4d0" stroke-width="4"/>
+    <rect x="53" y="238" width="181" height="66" rx="4" fill="#e0eff3"/>
+    <path d="M73 260H142M73 281H210" stroke="#6ba6b9" stroke-width="3"/>
+  </g>
+  <g font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif">
+    <rect x="72" y="68" width="6" height="24" rx="2" fill="#86d7df"/>
+    <text x="92" y="88" fill="#bbdae5" font-size="19" letter-spacing="3">RESOURCE COLLECTION · 03</text>
+    <text x="72" y="223" fill="#fff" font-size="68" font-weight="600" letter-spacing="6">产品资料</text>
+    <text x="76" y="285" fill="#e0eff4" font-size="28">虚构产品内容资料集</text>
+    <path d="M76 324H138" stroke="#86d7df" stroke-width="3"/>
+    <text x="76" y="371" fill="#bad8e2" font-size="20">多格式附件 · 统一归档 · 有效期管理</text>
+    <text x="76" y="408" fill="#bad8e2" font-size="18">不含真实药品信息或产品宣传主张</text>
+    <path d="M72 509H1128" stroke="#fff" stroke-opacity=".2"/>
+    <text x="76" y="550" fill="#c4e0e8" font-size="17">演示内容 / 非真实产品 / 不构成医学建议</text>
+    <text x="1128" y="550" fill="#c4e0e8" font-size="17" text-anchor="end">DEMO · 2026</text>
+  </g>
+</svg>
