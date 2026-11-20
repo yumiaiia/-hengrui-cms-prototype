@@ -1,5 +1,4 @@
 import { sampleArticleSource } from "./collectionSources";
-import { sampleCollectionTasks } from "./collection";
 import { convertLegacyTags } from "./migration";
 import { primaryTagId } from "./model";
 import {
@@ -319,7 +318,6 @@ export function seedState(): State {
       },
     ],
     tasks: [
-      ...sampleCollectionTasks(stamp),
       {
         id: "task1",
         name: "研究摘要 · 自动打标",

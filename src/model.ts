@@ -178,6 +178,7 @@ export interface Task {
   finishAt?: number;
   artifactKey?: string;
   artifactName?: string;
+  // Legacy collection-task metadata is retained for saved-data compatibility.
   collection?: {
     number: string;
     account: string;

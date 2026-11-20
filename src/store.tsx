@@ -1,9 +1,5 @@
 import { prepareSimplification } from "./simplification";
-import {
-  prepareCollection,
-  advanceCollectionQueue,
-  collectionQueueDue,
-} from "./collection";
+import { prepareCollection } from "./collection";
 import { advanceTagMatching, retryTagMatching } from "./tagMatching";
 import { prepareRecommendations } from "./recommendations";
 import { prepareAdministration } from "./administration";
@@ -218,10 +214,8 @@ export function CMSProvider({ children }: { children: ReactNode }) {
           t.finishAt <= Date.now() &&
           t.status === "处理中",
       );
-      const collectionDue = collectionQueueDue(ref.current);
-      if (!due.length && !collectionDue) return;
+      if (!due.length) return;
       update((s) => {
-        if (collectionDue) advanceCollectionQueue(s);
         for (const previous of due) {
           const task = s.tasks.find((t) => t.id === previous.id)!;
           if (task.type === "标签匹配") {
