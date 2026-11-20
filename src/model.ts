@@ -5,7 +5,6 @@ export type Permission =
   | "upload"
   | "edit"
   | "publish"
-  | "collect"
   | "exempt"
   | "tags"
   | "taxonomy"
@@ -17,7 +16,6 @@ export const permissionNames: Record<Permission, string> = {
   upload: "上传内容",
   edit: "编辑内容与审批",
   publish: "创建与提交发布",
-  collect: "处理文章更新",
   exempt: "免登记审批",
   tags: "维护内容标签",
   taxonomy: "维护标签库与推荐",
@@ -99,14 +97,7 @@ export interface Version {
     }
   >;
 }
-export type PublicationStatus =
-  | "草稿"
-  | "已提交"
-  | "下游处理中"
-  | "待发布"
-  | "已发布"
-  | "处理失败"
-  | "状态待确认";
+export type PublicationStatus = "草稿" | "待发布" | "已发布" | "发布失败";
 export interface Publication {
   id: string;
   assetId: string;
@@ -170,11 +161,16 @@ export interface TaskItem {
   label: string;
   status: Process;
   error?: string;
+  added?: number;
+  skipped?: boolean;
 }
 export interface Task {
   id: string;
   name: string;
-  type: "解析与打标" | "OCR" | "采集" | "导出";
+  type: "解析与打标" | "OCR" | "采集" | "导出" | "标签匹配";
+  tagIds?: string[];
+  actorId?: string;
+  result?: { added: number; affected: number; skipped: number };
   status: Process;
   items: TaskItem[];
   createdAt: string;
@@ -184,6 +180,7 @@ export interface Task {
   artifactName?: string;
 }
 export interface Article {
+  sourceUrl?: string;
   collectedAt?: string;
   id: string;
   title: string;
@@ -248,6 +245,7 @@ export interface State {
   publications?: Publication[];
   workspaceRevision?: number;
   administrationRevision?: number;
+  simplificationRevision?: number;
 }
 export const now = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;

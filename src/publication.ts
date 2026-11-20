@@ -103,7 +103,7 @@ export function saveReleaseBatch(
     snapshot: submit ? structuredClone(v) : undefined,
     submittedBy: actor!.id,
     plannedAt,
-    status: submit ? "已提交" : "草稿",
+    status: submit ? "待发布" : "草稿",
     submittedAt: submit ? now() : undefined,
     createdAt: old?.createdAt || now(),
     updatedAt: now(),

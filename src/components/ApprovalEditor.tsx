@@ -12,13 +12,12 @@ import {
   visibleFor,
   type Approval,
   type CredentialRevision,
-  type Evidence,
   type State,
   type User,
 } from "../model";
 import { demoCredential } from "../seed";
 import { loadBlob, putFiles } from "../storage";
-import { AssetImage, Badge, Button, Dialog, Empty, Field } from "./ui";
+import { AssetImage, Button, Dialog, Empty, Field } from "./ui";
 
 // Reuse provenance is transient, not part of the persisted revision schema.
 const origins = new WeakMap<CredentialRevision, string>();
@@ -243,6 +242,30 @@ export function ApprovalForm({
     onChange(result);
   }
   const shot = value.evidence[0];
+  async function retryOCR() {
+    if (!shot || inFlight.current || !can("edit")) return;
+    inFlight.current = true;
+    setBusy(true);
+    setFileError("");
+    try {
+      const blob = await loadBlob(shot.fileKey, shot.url);
+      if (!blob.size) throw new Error("截图文件为空，请替换截图");
+      if (active.current) {
+        // Local samples retain their supplied recognition; uploaded images have no OCR service.
+        change({ evidence: [{ ...shot }], confirmed: false });
+        if (shot.status === "无法识别")
+          setFileError("未识别出审批信息，请替换截图或填写后人工核对");
+      }
+    } catch (error) {
+      if (active.current)
+        setFileError(
+          error instanceof Error ? error.message : "截图读取失败，请替换截图",
+        );
+    } finally {
+      inFlight.current = false;
+      if (active.current) setBusy(false);
+    }
+  }
   const duplicate = credentials.find(
     (c) => credentialLatest(c).number.trim() === value.number.trim(),
   );
@@ -448,7 +471,13 @@ export function ApprovalForm({
                     ? "请核对识别结果"
                     : "审批信息一致"}
               </strong>
-              <Badge>{ocrWarnings(value).length ? "需核对" : "一致"}</Badge>
+              <Button
+                type="button"
+                disabled={busy || !can("edit")}
+                onClick={() => void retryOCR()}
+              >
+                重试识别
+              </Button>
             </div>
             <div className="ocr-comparison">
               <div>

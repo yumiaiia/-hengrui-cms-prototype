@@ -14,7 +14,7 @@ import { current, go, dateLabel } from "../model";
 import { Badge, Button, PageHeader, Empty, Pagination } from "../components/ui";
 import { contentAttention, type AttentionCategory } from "../workbench";
 export default function Workbench() {
-  const { assets, state, user, role, can } = useCMS();
+  const { assets, state, role, can } = useCMS();
   const [category, setCategory] = useState<AttentionCategory | "all">("all"),
     [page, setPage] = useState(1);
   const contentAllowed = !!role?.menus.includes("library"),
@@ -24,9 +24,7 @@ export default function Workbench() {
   const publications = publishAllowed
     ? (state.publications || []).filter((p) => visibleIds.has(p.assetId))
     : [];
-  const failed = publications.filter(
-    (p) => p.status === "处理失败" || p.status === "状态待确认",
-  );
+  const failed = publications.filter((p) => p.status === "发布失败");
   const upcoming = publications
     .filter((p) => p.status === "待发布" && p.plannedAt)
     .sort((a, b) => a.plannedAt.localeCompare(b.plannedAt))
@@ -54,7 +52,7 @@ export default function Workbench() {
     },
     {
       id: "expiry" as const,
-      name: "有效期提醒",
+      name: "30 天内到期或已过期",
       caption: "已过期及未来 30 天内到期的内容",
       icon: CalendarClock,
       tone: "amber",
@@ -68,7 +66,6 @@ export default function Workbench() {
     <div className="workbench-focused">
       <PageHeader
         title="工作台"
-        description={`${user?.name || "你好"}，查看需要处理的内容与近期发布安排。`}
         action={
           can("upload") && contentAllowed ? (
             <Button
@@ -107,14 +104,13 @@ export default function Workbench() {
                   <small>份内容</small>
                 </div>
                 <strong>{item.name}</strong>
-                <p>{item.caption}</p>
               </button>
             ))
           : null}
         {publishAllowed ? (
           <button
             className="queue-card queue-cyan"
-            onClick={() => go("publishing?status=需处理")}
+            onClick={() => go("publishing?status=发布失败")}
           >
             <div className="queue-top">
               <span className="queue-icon">
@@ -126,8 +122,7 @@ export default function Workbench() {
               {failed.length}
               <small>条记录</small>
             </div>
-            <strong>发布需处理</strong>
-            <p>发布失败或状态待确认</p>
+            <strong>发布失败</strong>
           </button>
         ) : null}
       </div>
@@ -142,11 +137,6 @@ export default function Workbench() {
                   待处理内容{" "}
                   <span className="count-pill">{filtered.length}</span>
                 </h2>
-                <p>
-                  {category === "all"
-                    ? "同一份内容合并展示；点击上方卡片筛选。"
-                    : `当前筛选：${cards.find((item) => item.id === category)?.name}`}
-                </p>
               </div>
               {category !== "all" ? (
                 <Button variant="ghost" onClick={() => select("all")}>
@@ -241,7 +231,6 @@ export default function Workbench() {
             <div className="panel-heading">
               <div>
                 <h2>近期发布</h2>
-                <p>按拟发布时间排序</p>
               </div>
               <CalendarClock size={19} />
             </div>

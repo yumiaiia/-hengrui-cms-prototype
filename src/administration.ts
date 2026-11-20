@@ -5,7 +5,6 @@ import {
   permissionNames,
   type Role,
   type State,
-  type User,
 } from "./model";
 export const superRoleId = "admin";
 export const superUserId = "u1";
@@ -137,11 +136,6 @@ export function prepareAdministration(s: State) {
         !role.permissions.includes("publish")
       )
         role.permissions.push("publish");
-      if (
-        role.menus.includes("collection") &&
-        !role.permissions.includes("collect")
-      )
-        role.permissions.push("collect");
     }
     role.permissions = role.permissions.filter((p) =>
       role.menus.includes(moduleForPermission(p)?.key || ""),

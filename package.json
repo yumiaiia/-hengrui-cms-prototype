@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "fflate": "^0.8.2",
     "lucide-react": "^0.577.0",
     "pdf-lib": "^1.17.1",

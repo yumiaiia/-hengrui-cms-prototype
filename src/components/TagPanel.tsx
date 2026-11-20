@@ -118,7 +118,6 @@ export function TagPanel({
       ) : (
         <div className="empty-tags">
           <p>暂未添加标签</p>
-          <small>可从标准标签库中选择。</small>
         </div>
       )}
       {editable ? (

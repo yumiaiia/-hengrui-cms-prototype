@@ -69,7 +69,7 @@ describe("账号与角色管理", () => {
       saveManagedUser(s, {
         name: "用户",
         account: "username",
-        roleId: "medical",
+        roleId: "operator",
       }),
     ).toThrow("邮箱地址");
     expect(() =>
@@ -107,16 +107,16 @@ describe("账号与角色管理", () => {
       saveManagedUser(s, {
         name: "重复",
         account: "a@example.com",
-        roleId: "medical",
+        roleId: "operator",
       }),
     ).toThrow("邮箱已存在");
-    saveManagedUser(s, { ...u, roleId: "medical" });
+    saveManagedUser(s, { ...u, roleId: "operator" });
     deleteManagedRole(s, "custom-role");
     expect(s.roles.some((r) => r.id === "custom-role")).toBe(false);
   });
-  it("普通预设角色不锁定，医学部角色可更名", () => {
+  it("普通预设角色不锁定，普通用户角色可更名", () => {
     const s = setup();
-    const medical = s.roles.find((r) => r.id === "medical")!;
+    const medical = s.roles.find((r) => r.id === "operator")!;
     saveManagedRole(s, { ...medical, name: "自定义医学角色" });
     expect(medical.name).toBe("自定义医学角色");
   });
@@ -140,7 +140,7 @@ describe("账号与角色管理", () => {
       saveManagedUser(s, {
         name: "用户",
         account: "b@example.com",
-        roleId: "medical",
+        roleId: "operator",
       }),
     ).toThrow("没有管理权限");
   });

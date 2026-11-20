@@ -3,12 +3,9 @@ import {
   LayoutDashboard,
   FolderOpen,
   Radio,
-  ShieldCheck,
   Tags,
   Settings2,
-  Search,
   Bell,
-  ListTodo,
   ChevronDown,
   PanelLeftClose,
   PanelLeftOpen,
@@ -39,7 +36,6 @@ export default function Shell({
 }) {
   const { state, user, role, update, assets } = useCMS();
   const [collapsed, setCollapsed] = useState(false);
-  const [query, setQuery] = useState("");
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [profile, setProfile] = useState(false);
   const [help, setHelp] = useState(false);
@@ -47,15 +43,6 @@ export default function Shell({
     (n) => !n.adminOnly || role?.permissions.includes("admin"),
   );
   const unread = notices.filter((n) => !n.read).length;
-  const visibleIds = new Set(assets.map((a) => a.id));
-  const tasks = state.tasks.filter(
-    (t) =>
-      t.items.length > 0 &&
-      t.items.every((i) => i.assetId && visibleIds.has(i.assetId)),
-  );
-  const processing = tasks.filter(
-    (t) => t.status === "处理中" || t.status === "排队中",
-  ).length;
   const active =
     route === "content" || route === "upload"
       ? "library"
@@ -82,9 +69,7 @@ export default function Shell({
             <i />
             <i />
           </span>
-          <span className="brand-name">
-            恒瑞 CMS<small>内容资产管理平台</small>
-          </span>
+          <span className="brand-name">恒瑞 CMS</span>
         </a>
         <div className="workspace-label">
           工作空间 <span>恒瑞医药</span>
@@ -138,34 +123,9 @@ export default function Shell({
           <div className="breadcrumb">
             工作空间 <span>/</span>
             <strong>
-              {menu.find((m) => m.id === active)?.name ||
-                (active === "tasks" ? "任务中心" : "内容管理")}
+              {menu.find((m) => m.id === active)?.name || "内容管理"}
             </strong>
           </div>
-          <div className="global-search">
-            <Search size={16} />
-            <input
-              placeholder="搜索内容、编号或关键词"
-              aria-label="全局搜索"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter")
-                  go("library?q=" + encodeURIComponent(query));
-              }}
-            />
-            <kbd>↵</kbd>
-          </div>
-          <span className="demo-indicator">本地演示</span>
-          <button
-            className="icon-btn top-icon"
-            title="任务中心"
-            aria-label="任务中心"
-            onClick={() => go("tasks")}
-          >
-            <ListTodo size={20} />
-            {processing ? <b>{processing}</b> : null}
-          </button>
           <button
             className={`icon-btn top-icon ${noticeOpen ? "is-active" : ""}`}
             aria-label="消息通知"
@@ -186,7 +146,7 @@ export default function Shell({
             {profile ? (
               <div className="profile-menu">
                 <strong>{user?.name}</strong>
-                <small>{role?.name} · 本地演示账号</small>
+                <small>{role?.name}</small>
                 <Button
                   variant="ghost"
                   icon={<LogOut size={15} />}
@@ -287,7 +247,7 @@ export default function Shell({
               <Badge tone="green">后台处理</Badge>
               <h3>归档后继续工作</h3>
               <p>
-                原文件保存后即归档，解析和打标在后台进行。失败项可在任务中心单独重试，正常标签无需逐条确认。
+                原文件保存后即归档，解析和打标在后台进行。失败项可在内容详情单独重试，正常标签无需逐条确认。
               </p>
             </section>
             <section>

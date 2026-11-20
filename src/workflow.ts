@@ -122,8 +122,8 @@ export function prepareWorkspace(state: State): State {
   }[] = [
     { assetId: "a1", status: "待发布", offset: 2 },
     { assetId: "a6", status: "已发布", offset: -1 },
-    { assetId: "a7", status: "处理失败", offset: 3 },
-    { assetId: "a8", status: "下游处理中", offset: 4 },
+    { assetId: "a7", status: "发布失败", offset: 3 },
+    { assetId: "a8", status: "待发布", offset: 4 },
   ];
   if (!s.publications.length)
     for (const [i, sample] of samples.entries()) {
@@ -150,7 +150,7 @@ export function prepareWorkspace(state: State): State {
         revision: 1,
         previews: [],
       };
-      if (sample.status === "处理失败")
+      if (sample.status === "发布失败")
         record.error = "下游反馈：封面资源获取失败，请更换封面后重新提交。";
       if (sample.status === "待发布" || sample.status === "已发布")
         record.previews = ["微网站", "企微端", "微信端"].map((port, j) => ({

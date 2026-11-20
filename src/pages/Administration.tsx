@@ -81,7 +81,6 @@ export default function Administration() {
   const filteredRoles = state.roles.filter((r) =>
     r.name.toLowerCase().includes(roleSearch.trim().toLowerCase()),
   );
-  const chosenRole = state.roles.find((r) => r.id === userDraft?.roleId);
   const lockedRole = roleDraft?.id === superRoleId;
   function editUser(item?: User) {
     setUserError("");
@@ -177,10 +176,7 @@ export default function Administration() {
   }
   return (
     <div className="cms-admin-page">
-      <PageHeader
-        title="系统管理"
-        description="创建团队账号，按角色配置菜单与操作权限。"
-      />
+      <PageHeader title="系统管理" />
       <Tabs
         value={tab}
         onChange={setTab}
@@ -205,10 +201,7 @@ export default function Administration() {
               创建账号
             </Button>
           </div>
-          <div className="admin-inline-help">
-            <LockKeyhole size={15} />
-            超级管理员账号由系统保留；其他账号可编辑和停用。邮箱是唯一登录账号。
-          </div>
+
           {filteredUsers.length ? (
             <div className="table-wrap">
               <table className="data-table">
@@ -425,11 +418,7 @@ export default function Administration() {
                 }}
               />
             </Field>
-            <Field
-              label="邮箱"
-              required
-              hint="作为唯一登录账号，忽略大小写；停用账号的邮箱仍保留。"
-            >
+            <Field label="邮箱" required>
               <input
                 aria-label="账号邮箱"
                 type="email"
@@ -468,8 +457,6 @@ export default function Administration() {
             </Field>
             {state.roles.length === 1 ? (
               <Note tone="amber">请先在角色管理中创建角色，再创建账号。</Note>
-            ) : chosenRole ? (
-              <Note>将继承“{chosenRole.name}”的菜单与操作权限。</Note>
             ) : null}
             {userError ? (
               <p className="cms-form-error" role="alert">
@@ -522,9 +509,6 @@ export default function Administration() {
               </div>
               <div className="role-permission-intro">
                 <strong>按模块配置权限</strong>
-                <p>
-                  开启菜单后可查看该模块；操作权限单独勾选。关闭菜单会同时取消该模块的操作权限。
-                </p>
               </div>
               <div className="role-permission-modules">
                 {permissionModules.map((module) => {
@@ -556,7 +540,6 @@ export default function Administration() {
                           />
                           <span>
                             <strong>{module.label}</strong>
-                            <small>{module.description}</small>
                           </span>
                         </label>
                         <span>
@@ -590,7 +573,6 @@ export default function Administration() {
                               />
                               <span>
                                 <strong>{action.label}</strong>
-                                <small>{action.description}</small>
                               </span>
                             </label>
                           ))}

@@ -10,7 +10,6 @@ const ContentDetail = lazy(() => import("./pages/ContentDetail"));
 const Collection = lazy(() => import("./pages/Collection"));
 const Tags = lazy(() => import("./pages/Tags"));
 const Administration = lazy(() => import("./pages/Administration"));
-const Tasks = lazy(() => import("./pages/Tasks"));
 const Login = lazy(() => import("./pages/Login"));
 const Publishing = lazy(() => import("./pages/Publishing"));
 const PublicationPreview = lazy(() =>
@@ -45,7 +44,8 @@ export default function App() {
     return () => window.removeEventListener("hashchange", change);
   }, []);
   const path = hash.replace(/^#\//, "").split("?")[0];
-  const [route, id] = path.split("/");
+  const [rawRoute, id] = path.split("/");
+  const route = rawRoute === "tasks" ? "library" : rawRoute;
   const loading = (
     <div className="loading-page">
       <span className="loading-spinner" />
@@ -64,7 +64,7 @@ export default function App() {
       : route === "publication-preview"
         ? "publishing"
         : route;
-  const allowed = route === "tasks" || role?.menus.includes(menu);
+  const allowed = role?.menus.includes(menu);
   let content;
   if (!allowed)
     content = (
@@ -102,9 +102,6 @@ export default function App() {
         break;
       case "admin":
         content = <Administration />;
-        break;
-      case "tasks":
-        content = <Tasks />;
         break;
       default:
         content = (

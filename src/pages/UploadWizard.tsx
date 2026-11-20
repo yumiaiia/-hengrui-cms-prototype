@@ -448,14 +448,7 @@ export default function UploadWizard() {
         <ArrowLeft size={16} />
         返回{assetId ? "内容详情" : "内容库"}
       </button>
-      <PageHeader
-        title={assetId ? "上传新版本" : "新增内容"}
-        description={
-          existing
-            ? `${existing.code} · 当前 V${existing.current}；归档成功即切换新版本，历史记录保留。`
-            : "添加文件或公开链接，完成审批登记后自动归档。"
-        }
-      />
+      <PageHeader title={assetId ? "上传新版本" : "新增内容"} />
       {error ? (
         <p className="error-text" role="alert">
           {error}
@@ -630,11 +623,6 @@ export default function UploadWizard() {
                 </div>
               ))}
             </div>
-            {!items.length ? (
-              <p className="muted">
-                添加文件或公开链接后，在这里编辑内容标题。
-              </p>
-            ) : null}
           </section>
           <aside className="panel batch-approval">
             <h2>审批信息</h2>
@@ -658,9 +646,7 @@ export default function UploadWizard() {
                     setConfirming(false);
                   }}
                 />
-                <span>
-                  需要登记<small>填写审批编号并上传截图</small>
-                </span>
+                <span>需要登记</span>
               </label>
               <label className={mode === "exempt" ? "active" : ""}>
                 <input
@@ -678,9 +664,7 @@ export default function UploadWizard() {
                 <span>
                   不需要登记
                   <small>
-                    {cms.can("exempt")
-                      ? "免填审批信息，不执行 OCR"
-                      : "当前角色没有免登记权限"}
+                    {cms.can("exempt") ? "" : "当前角色没有免登记权限"}
                   </small>
                 </span>
               </label>
@@ -696,11 +680,7 @@ export default function UploadWizard() {
                   setConfirming(false);
                 }}
               />
-            ) : (
-              <p className="muted">
-                无需填写审批编号或上传截图，不执行 OCR 校验。
-              </p>
-            )}
+            ) : null}
           </aside>
         </div>
       </fieldset>
@@ -708,9 +688,6 @@ export default function UploadWizard() {
         <span>
           新增 {newCount} 份内容
           {versionCount > 0 ? ` · 创建 ${versionCount} 个新版本` : ""}
-          <small>
-            归档后自动解析并识别标签，历史版本和已提交的发布记录保留。
-          </small>
         </span>
         <Button
           variant="primary"

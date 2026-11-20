@@ -1,4 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  tagUsage,
+  tagImpact,
+  matchableAssets,
+  startTagMatching,
+  retryTagMatching,
+} from "../tagMatching";
+import {
+  applyTagImport,
+  previewTagImport,
+  readTagWorkbook,
+  writeTagWorkbook,
+  type TagImportPreview,
+} from "../tagTransfer";
+import { download } from "../storage";
 import { Pencil, Plus } from "lucide-react";
 import { useCMS } from "../store";
 import { uid, type Tag } from "../model";
@@ -19,14 +34,58 @@ import { RecommendedTags } from "../components/RecommendedTags";
 type Editor = Omit<Tag, "id"> & { id?: string };
 
 export default function Tags() {
-  const { state, assets, user, can, update, toast } = useCMS();
+  const { state, user, can, update, toast } = useCMS();
   const [tab, setTab] = useState("library");
   const [search, setSearch] = useState("");
   const [primaryId, setPrimaryId] = useState("");
   const [editor, setEditor] = useState<Editor>();
   const [error, setError] = useState("");
+  const [matching, setMatching] = useState(false);
+  const [transfer, setTransfer] = useState<TagImportPreview>();
+  const [busy, setBusy] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const task = state.tasks.find((t) => t.type === "标签匹配");
+  const previous = state.tags.find((t) => t.id === editor?.id);
+  const impacts =
+    previous && editor
+      ? tagImpact(previous, { ...editor, id: previous.id })
+      : [];
+  async function exportTags(template = false) {
+    if (template ? !can("taxonomy") : !can("export")) return;
+    setBusy(true);
+    try {
+      download(
+        await writeTagWorkbook(state.tags, template),
+        template ? "标签导入模板.xlsx" : "标签库.xlsx",
+      );
+    } catch {
+      toast("Excel 文件生成失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function importTags(file?: File) {
+    if (!file || !can("taxonomy")) return;
+    setBusy(true);
+    try {
+      if (!file.name.endsWith(".xlsx")) throw new Error("请选择 .xlsx 文件");
+      setTransfer(
+        previewTagImport(
+          state,
+          await readTagWorkbook(await file.arrayBuffer()),
+        ),
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Excel 文件读取失败");
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
   useEffect(() => {
     setEditor(undefined);
+    setTransfer(undefined);
+    setMatching(false);
   }, [user?.id]);
 
   const roots = primaryTags(state.tags);
@@ -94,33 +153,10 @@ export default function Tags() {
         setPrimaryId(tag.parentId || tag.id);
         setSearch("");
         setEditor(undefined);
-        toast("标签已保存，已有内容绑定保留。");
+        toast("标签已保存");
       }
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "标签保存失败。");
-    }
-  }
-
-  function toggleEnabled(tag: Tag) {
-    try {
-      const ok = update(
-        (s) => {
-          const target = s.tags.find((item) => item.id === tag.id);
-          if (!target) throw new Error("标签已不存在。");
-          target.enabled = !target.enabled;
-        },
-        {
-          action: tag.enabled ? "停用标签" : "启用标签",
-          object: tagLabel(state.tags, tag),
-          detail: "已有内容绑定保留，不删除标签。",
-          category: "标签",
-        },
-        "taxonomy",
-      );
-      if (ok)
-        toast(tag.enabled ? "标签已停用，已有绑定保留。" : "标签已启用。");
-    } catch (failure) {
-      toast(failure instanceof Error ? failure.message : "操作失败。");
     }
   }
 
@@ -128,8 +164,96 @@ export default function Tags() {
     <div>
       <PageHeader
         title="标签管理"
-        description={`${roots.length} 个标签分类 · ${state.tags.filter((tag) => tag.parentId !== null).length} 个标签`}
+        action={
+          <>
+            <Button
+              disabled={
+                !can("taxonomy") || !can("tags") || task?.status === "处理中"
+              }
+              onClick={() => setMatching(true)}
+            >
+              重新匹配
+            </Button>
+            <Button
+              disabled={!can("taxonomy") || busy}
+              onClick={() => fileInput.current?.click()}
+            >
+              导入
+            </Button>
+            <Button
+              disabled={!can("export") || busy}
+              onClick={() => void exportTags()}
+            >
+              导出全部标签
+            </Button>
+            <Button
+              disabled={!can("taxonomy") || busy}
+              onClick={() => void exportTags(true)}
+            >
+              下载模板
+            </Button>
+          </>
+        }
       />
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".xlsx"
+        hidden
+        aria-label="导入标签文件"
+        onChange={(e) => void importTags(e.target.files?.[0])}
+      />
+      {task ? (
+        <section
+          className="panel match-result"
+          aria-label="标签匹配结果"
+          aria-live="polite"
+        >
+          <div className="section-heading">
+            <strong>重新匹配 · {task.status}</strong>
+            {task.items.some((i) => i.status === "失败") ? (
+              <Button
+                disabled={!can("taxonomy") || !can("tags")}
+                onClick={() => {
+                  try {
+                    update((s) => retryTagMatching(s, task.id));
+                  } catch (e) {
+                    toast(String(e));
+                  }
+                }}
+              >
+                重试失败项
+              </Button>
+            ) : null}
+          </div>
+          <progress
+            aria-label="标签匹配进度"
+            max={task.items.length}
+            value={
+              task.items.filter((i) => ["完成", "失败"].includes(i.status))
+                .length
+            }
+          />
+          <p>
+            已处理{" "}
+            {
+              task.items.filter((i) => ["完成", "失败"].includes(i.status))
+                .length
+            }
+            /{task.items.length} 份 · 新增 {task.result?.added || 0} 个绑定 ·
+            涉及 {task.result?.affected || 0} 份 · 跳过{" "}
+            {task.result?.skipped || 0} 份 · 失败{" "}
+            {task.items.filter((i) => i.status === "失败").length} 份
+          </p>
+          {task.items
+            .filter((i) => i.status === "失败")
+            .map((i) => (
+              <p className="error-text" key={i.assetId}>
+                {i.label}：{i.error}
+              </p>
+            ))}
+        </section>
+      ) : null}
       <Tabs
         items={[
           { key: "library", label: "标签库" },
@@ -237,24 +361,23 @@ export default function Tags() {
                   <article className="secondary-card" key={tag.id}>
                     <h3>{tag.name}</h3>
                     <div className="actions">
-                      <Badge
-                        tone={availableTag(state.tags, tag) ? "green" : "gray"}
-                      >
-                        {!tag.enabled
-                          ? "已停用"
-                          : selected?.enabled
-                            ? "已启用"
-                            : "标签分类已停用"}
-                      </Badge>
-                      <Badge tone="gray">
-                        {tag.external ? "对外展示" : "仅内部"}
-                      </Badge>
+                      {!availableTag(state.tags, tag) ? (
+                        <Badge>
+                          {!tag.enabled ? "已停用" : "标签分类已停用"}
+                        </Badge>
+                      ) : null}
+                      {tag.external ? <span>对外展示</span> : null}
                     </div>
                     <div className="actions">
                       <Button
                         variant="ghost"
+                        aria-label={`${tag.enabled ? "停用" : "启用"}标签 ${tag.name}`}
                         disabled={!can("taxonomy")}
-                        onClick={() => toggleEnabled(tag)}
+                        onClick={() => {
+                          openEditor(tag);
+                          if (can("taxonomy"))
+                            setEditor({ ...tag, enabled: !tag.enabled });
+                        }}
                       >
                         {tag.enabled ? "停用" : "启用"}
                       </Button>
@@ -262,6 +385,7 @@ export default function Tags() {
                         variant="ghost"
                         disabled={!can("taxonomy")}
                         icon={<Pencil size={14} />}
+                        aria-label={`编辑标签 ${tag.name}`}
                         onClick={() => openEditor(tag)}
                       >
                         编辑
@@ -301,6 +425,128 @@ export default function Tags() {
           </div>
         </>
       )}
+      {matching ? (
+        <Dialog
+          title="重新匹配标签"
+          onClose={() => setMatching(false)}
+          footer={
+            <>
+              <Button onClick={() => setMatching(false)}>取消</Button>
+              <Button
+                variant="primary"
+                disabled={
+                  !matchableAssets(state).length ||
+                  !can("taxonomy") ||
+                  !can("tags")
+                }
+                onClick={() => {
+                  try {
+                    if (
+                      update(
+                        (s) => {
+                          startTagMatching(s);
+                        },
+                        {
+                          action: "重新匹配标签",
+                          object: "标签库",
+                          category: "标签",
+                        },
+                        "taxonomy",
+                      )
+                    )
+                      setMatching(false);
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : "匹配启动失败");
+                  }
+                }}
+              >
+                开始匹配
+              </Button>
+            </>
+          }
+        >
+          <p>
+            处理 {matchableAssets(state).length}{" "}
+            份文件的当前版本，只补充缺失标签。
+          </p>
+        </Dialog>
+      ) : null}
+      {transfer ? (
+        <Dialog
+          wide
+          title="标签导入预览"
+          onClose={() => setTransfer(undefined)}
+          footer={
+            <>
+              <Button onClick={() => setTransfer(undefined)}>取消</Button>
+              <Button
+                variant="primary"
+                disabled={
+                  !can("taxonomy") ||
+                  transfer.rows.some((r) => r.error) ||
+                  !(transfer.added + transfer.updated)
+                }
+                onClick={() => {
+                  try {
+                    if (
+                      update(
+                        (s) => applyTagImport(s, transfer),
+                        {
+                          action: "导入标签",
+                          object: "标签库",
+                          detail: `新增 ${transfer.added}，更新 ${transfer.updated}`,
+                          category: "标签",
+                        },
+                        "taxonomy",
+                      )
+                    ) {
+                      setTransfer(undefined);
+                      toast("标签已导入");
+                    }
+                  } catch (e) {
+                    toast(e instanceof Error ? e.message : "导入失败");
+                  }
+                }}
+              >
+                确认导入
+              </Button>
+            </>
+          }
+        >
+          <p>
+            新增 {transfer.added} · 更新 {transfer.updated} · 无变化{" "}
+            {transfer.unchanged} · 错误{" "}
+            {transfer.rows.filter((r) => r.error).length} · 影响{" "}
+            {transfer.affected} 个文件
+          </p>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>位置</th>
+                  <th>名称</th>
+                  <th>变更</th>
+                  <th>影响</th>
+                  <th>错误</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfer.rows.map((r, i) => (
+                  <tr key={i}>
+                    <td>
+                      {r.sheet} 第 {r.row} 行
+                    </td>
+                    <td>{r.name}</td>
+                    <td>{r.action}</td>
+                    <td>{r.changes || "—"}</td>
+                    <td className="error-text">{r.error || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Dialog>
+      ) : null}
       {editor ? (
         <Dialog
           title={`${editor.id ? "编辑" : "新增"}${editor.parentId === null ? "一级" : "二级"}标签`}
@@ -380,7 +626,15 @@ export default function Tags() {
             </label>
             <button type="submit" hidden />
           </form>
-          <p className="note">修改或停用标签不会删除已有内容绑定。</p>
+          {previous ? (
+            <div className="tag-impact" role="status">
+              <strong>已应用于 {tagUsage(state, [previous.id])} 个文件</strong>
+              {impacts.map((x) => (
+                <p key={x}>{x}</p>
+              ))}
+              <p>已有绑定保留，修改不会自动发布内容。</p>
+            </div>
+          ) : null}
         </Dialog>
       ) : null}
     </div>

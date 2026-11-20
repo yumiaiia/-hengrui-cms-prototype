@@ -5,12 +5,9 @@ import {
   Download,
   FileText,
   Filter,
-  List,
   Plus,
-  Search,
   Send,
   ShieldCheck,
-  Tags,
   X,
 } from "lucide-react";
 import { useCMS } from "../store";
@@ -21,10 +18,9 @@ import {
   expiryStatus,
   go,
   now,
-  type Asset,
 } from "../model";
 import { pendingRecommendationsForVersion } from "../taxonomy";
-import { failedPages, matchesTags, pageHits, paginated } from "../workflow";
+import { failedPages, matchesTags, pageHits } from "../workflow";
 import {
   Badge,
   Button,
@@ -35,7 +31,7 @@ import {
   Pagination,
   SearchBox,
 } from "../components/ui";
-import { PageCanvas } from "../components/DocumentReader";
+import { ExportHistory } from "../components/ExportHistory";
 import { ApprovalEditor } from "../components/ApprovalEditor";
 import { TagPanel } from "../components/TagPanel";
 import { ExportDialog } from "../export";
@@ -89,12 +85,6 @@ export default function ContentLibrary() {
       return defaults;
     }
   });
-  const [view, setView] = useState(
-    () =>
-      params.get("view") ||
-      sessionStorage.getItem("cms-library-view") ||
-      "list",
-  );
   const [page, setPage] = useState(1);
   const [more, setMore] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -102,12 +92,15 @@ export default function ContentLibrary() {
   const [tagging, setTagging] = useState("");
   const [approval, setApproval] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportHistory, setExportHistory] = useState(params.has("exports"));
   const [action, setAction] = useState("");
   const [reason, setReason] = useState("");
-  const [preview, setPreview] = useState<ReturnType<typeof pageHits>[number]>();
   useEffect(() => {
     sessionStorage.setItem(cache, JSON.stringify(filters));
   }, [cache, filters]);
+  useEffect(() => {
+    sessionStorage.removeItem("cms-library-view");
+  }, []);
   function change<K extends keyof Filters>(key: K, value: Filters[K]) {
     setFilters((f) => ({ ...f, [key]: value }));
     setPage(1);
@@ -137,7 +130,7 @@ export default function ContentLibrary() {
             (filters.process === "异常"
               ? v.process === "失败" || failedPages(v).length > 0
               : v.process === filters.process)) &&
-          (view === "pages" || q.includes(filters.q.toLowerCase())) &&
+          q.includes(filters.q.toLowerCase()) &&
           matchesTags(
             v.tags.filter((b) => !b.page),
             filters.tags,
@@ -145,7 +138,7 @@ export default function ContentLibrary() {
           )
         );
       }),
-    [assets, filters, state.tags, state.users, view],
+    [assets, filters, state.tags, state.users],
   );
   const hits = useMemo(
     () =>
@@ -154,21 +147,20 @@ export default function ContentLibrary() {
         state.tags,
         filters.tags,
         filters.pageTags,
-        view === "pages" ? filters.q : "",
+        "",
         Object.fromEntries(
           state.users.map((u) => [u.id, `${u.name} ${u.account}`]),
         ),
       ),
-    [base, state.tags, state.users, filters, view],
+    [base, state.tags, state.users, filters],
   );
   const rows = filters.pageTags.length
     ? base.filter((a) => hits.some((h) => h.asset.id === a.id))
     : base;
-  const total = view === "pages" ? hits.length : rows.length;
-  const size = view === "pages" ? 12 : 8;
+  const total = rows.length;
+  const size = 8;
   const active = Math.min(page, Math.max(1, Math.ceil(total / size)));
   const displayed = rows.slice((active - 1) * size, active * size);
-  const shownHits = hits.slice((active - 1) * size, active * size);
   const chosen = assets.filter((a) => selected.includes(a.id));
   const toggle = (id: string) =>
     setSelected((ids) =>
@@ -210,7 +202,6 @@ export default function ContentLibrary() {
     <div className="library-v3">
       <PageHeader
         title="内容库"
-        description="管理整份内容，也能通过标签找到具体页面。"
         action={
           <Button
             variant="primary"
@@ -224,48 +215,19 @@ export default function ContentLibrary() {
       />
       <section className="panel content-browser">
         <div className="library-view-tabs">
-          <div className="view-tabs">
-            {[
-              { id: "list", name: "文件列表", icon: <List size={17} /> },
-              { id: "pages", name: "标签视图", icon: <Tags size={17} /> },
-            ].map((item) => (
-              <button
-                key={item.id}
-                className={view === item.id ? "active" : ""}
-                onClick={() => {
-                  setView(item.id);
-                  sessionStorage.setItem("cms-library-view", item.id);
-                  setPage(1);
-                  setSelected([]);
-                }}
-              >
-                {item.icon}
-                {item.name}
-              </button>
-            ))}
+          <strong>文件列表</strong>
+          <div className="actions">
+            <span>{rows.length} 份内容</span>
+            {can("export") ? (
+              <Button onClick={() => setExportHistory(true)}>导出记录</Button>
+            ) : null}
           </div>
-          <span className="results-count">
-            {view === "pages" ? (
-              <>
-                <strong>{total}</strong> 页 · 来自{" "}
-                {new Set(hits.map((h) => h.asset.id)).size} 份内容
-              </>
-            ) : (
-              <>
-                <strong>{rows.length}</strong> 份内容
-              </>
-            )}
-          </span>
         </div>
         <div className="browser-search-row">
           <SearchBox
             value={filters.q}
             onChange={(q) => change("q", q)}
-            placeholder={
-              view === "pages"
-                ? "搜索页面文字、文件名称、编号或维护人"
-                : "搜索标题、内容编号、审批编号或维护人"
-            }
+            placeholder="搜索标题、内容编号、审批编号或维护人"
           />
           <select
             aria-label="内容类型"
@@ -306,11 +268,6 @@ export default function ContentLibrary() {
             selected={filters.pageTags}
             onChange={(ids) => change("pageTags", ids)}
           />
-          <span>
-            {view === "pages"
-              ? "每张卡片对应一个页面，点击可打开原文定位。"
-              : "点击标签可筛选；勾选文件后可批量处理。"}
-          </span>
         </div>
         {more ? (
           <div className="inline-filter-panel">
@@ -321,7 +278,9 @@ export default function ContentLibrary() {
               >
                 <option value="">全部来源</option>
                 {[...new Set(assets.map((a) => current(a).source))].map((v) => (
-                  <option key={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {v === "未匹配" ? "有推荐标签" : v}
+                  </option>
                 ))}
               </select>
             </Field>
@@ -343,7 +302,9 @@ export default function ContentLibrary() {
               >
                 <option value="">全部</option>
                 {["待打标", "打标中", "已完成", "未匹配", "失败"].map((v) => (
-                  <option key={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {v === "未匹配" ? "有推荐标签" : v}
+                  </option>
                 ))}
               </select>
             </Field>
@@ -354,7 +315,9 @@ export default function ContentLibrary() {
               >
                 <option value="">全部</option>
                 {["排队中", "处理中", "完成", "失败"].map((v) => (
-                  <option key={v}>{v}</option>
+                  <option key={v} value={v}>
+                    {v === "未匹配" ? "有推荐标签" : v}
+                  </option>
                 ))}
                 <option value="异常">需要处理</option>
               </select>
@@ -417,7 +380,7 @@ export default function ContentLibrary() {
             </button>
           </div>
         ) : null}
-        {chosen.length && view === "list" ? (
+        {chosen.length ? (
           <div className="batch-bar">
             <strong>已选 {chosen.length} 份</strong>
             <button onClick={() => setSelected(rows.map((a) => a.id))}>
@@ -456,71 +419,12 @@ export default function ContentLibrary() {
         ) : null}
         {!total ? (
           <Empty
-            title={view === "pages" ? "没有匹配的页面" : "没有匹配的内容"}
+            title="没有匹配的内容"
             description="试试减少筛选条件，或更换关键词。"
             action={
               <Button onClick={() => setFilters(defaults)}>清空条件</Button>
             }
           />
-        ) : view === "pages" ? (
-          <div className="page-results-grid">
-            {shownHits.map((hit) => (
-              <article
-                className="page-result-card"
-                key={`${hit.asset.id}-${hit.version.number}-${hit.page}`}
-              >
-                <button
-                  className="page-result-image"
-                  onClick={() => setPreview(hit)}
-                >
-                  <PageCanvas version={hit.version} page={hit.page} thumbnail />
-                </button>
-                <div className="page-result-caption">
-                  <span>
-                    {hit.version.kind} ·{" "}
-                    {paginated(hit.version) ? `第 ${hit.page} 页` : "整条内容"}{" "}
-                    · V{hit.version.number}.0
-                  </span>
-                  <button
-                    aria-label={`打开${hit.version.title}第${hit.page}页`}
-                    onClick={() =>
-                      go(
-                        `content/${hit.asset.id}?version=${hit.version.number}&page=${hit.page}`,
-                      )
-                    }
-                  >
-                    <ArrowUpRight size={15} />
-                  </button>
-                </div>
-                <div className="page-result-meta">
-                  <button
-                    className="title-link"
-                    onClick={() => setPreview(hit)}
-                  >
-                    {hit.version.title}
-                  </button>
-                  <div className="tag-chips">
-                    {hit.bindings.slice(0, 4).map((b) => (
-                      <button
-                        key={b.tagId}
-                        className={`tag-chip ${filters.pageTags.includes(b.tagId) ? "is-hit" : ""}`}
-                        onClick={() =>
-                          change(
-                            "pageTags",
-                            filters.pageTags.includes(b.tagId)
-                              ? filters.pageTags.filter((id) => id !== b.tagId)
-                              : [...filters.pageTags, b.tagId],
-                          )
-                        }
-                      >
-                        {state.tags.find((t) => t.id === b.tagId)?.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
         ) : (
           <div className="table-wrap">
             <table className="data-table library-file-table">
@@ -610,6 +514,16 @@ export default function ContentLibrary() {
                                 }
                               >
                                 {failedPages(v).length} 页打标失败
+                              </button>
+                            ) : v.tagStatus !== "已完成" &&
+                              v.tagStatus !== "未匹配" ? (
+                              <button
+                                className="page-failure-link"
+                                onClick={() => go(`content/${a.id}`)}
+                              >
+                                {v.tagStatus === "失败"
+                                  ? "材料打标失败"
+                                  : v.tagStatus}
                               </button>
                             ) : null}
                           </div>
@@ -716,6 +630,9 @@ export default function ContentLibrary() {
           onChange={setPage}
         />
       </section>
+      {exportHistory ? (
+        <ExportHistory onClose={() => setExportHistory(false)} />
+      ) : null}
       {picked ? (
         <Dialog drawer title="内容标签" onClose={() => setTagging("")}>
           <h3>{current(picked).title}</h3>
@@ -759,58 +676,6 @@ export default function ContentLibrary() {
               onChange={(e) => setReason(e.target.value)}
             />
           </Field>
-        </Dialog>
-      ) : null}
-      {preview ? (
-        <Dialog
-          wide
-          title={`${preview.version.title} · 第 ${preview.page} 页`}
-          onClose={() => setPreview(undefined)}
-          footer={
-            <>
-              <Button
-                onClick={() => {
-                  const i = hits.indexOf(preview);
-                  setPreview(hits[Math.max(0, i - 1)]);
-                }}
-                disabled={hits.indexOf(preview) <= 0}
-              >
-                上一条结果
-              </Button>
-              <Button
-                onClick={() => {
-                  const i = hits.indexOf(preview);
-                  setPreview(hits[Math.min(hits.length - 1, i + 1)]);
-                }}
-                disabled={hits.indexOf(preview) >= hits.length - 1}
-              >
-                下一条结果
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() =>
-                  go(
-                    `content/${preview.asset.id}?version=${preview.version.number}&page=${preview.page}`,
-                  )
-                }
-              >
-                打开原文件并定位
-              </Button>
-            </>
-          }
-        >
-          <PageCanvas
-            key={`${preview.asset.id}-${preview.page}`}
-            version={preview.version}
-            page={preview.page}
-          />
-          <div className="tag-chips">
-            {preview.bindings.map((b) => (
-              <span className="tag-chip" key={b.tagId}>
-                {state.tags.find((t) => t.id === b.tagId)?.name}
-              </span>
-            ))}
-          </div>
         </Dialog>
       ) : null}
     </div>

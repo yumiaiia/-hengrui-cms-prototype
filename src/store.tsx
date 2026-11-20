@@ -1,3 +1,5 @@
+import { prepareSimplification } from "./simplification";
+import { advanceTagMatching, retryTagMatching } from "./tagMatching";
 import { prepareRecommendations } from "./recommendations";
 import { prepareAdministration } from "./administration";
 import {
@@ -16,7 +18,6 @@ import { availableTag } from "./taxonomy";
 import {
   canRole,
   primaryTagId,
-  current,
   now,
   uid,
   visibleFor,
@@ -57,21 +58,26 @@ function initial() {
     const raw = localStorage.getItem(key);
     if (raw) {
       const original = JSON.parse(raw);
-      const migrated = prepareRecommendations(
-        prepareAdministration(prepareWorkspace(migrateState(original))),
+      const migrated = prepareSimplification(
+        prepareRecommendations(
+          prepareAdministration(prepareWorkspace(migrateState(original))),
+        ),
       );
       if (original.schema === 1) {
         if (!localStorage.getItem(key + "-schema1-backup"))
           localStorage.setItem(key + "-schema1-backup", raw);
-        localStorage.setItem(key, JSON.stringify(migrated));
       }
+      if (JSON.stringify(migrated) !== raw)
+        localStorage.setItem(key, JSON.stringify(migrated));
       return migrated;
     }
   } catch (error) {
     loadFailure = error instanceof Error ? error.message : "原型数据无法读取";
   }
-  return prepareRecommendations(
-    prepareAdministration(prepareWorkspace(seedState())),
+  return prepareSimplification(
+    prepareRecommendations(
+      prepareAdministration(prepareWorkspace(seedState())),
+    ),
   );
 }
 export function CMSProvider({ children }: { children: ReactNode }) {
@@ -157,11 +163,11 @@ export function CMSProvider({ children }: { children: ReactNode }) {
   const retryTask = (id: string) => {
     const t = state.tasks.find((t) => t.id === id);
     if (!t) return;
-    if (
-      !can(
-        t.type === "导出" ? "export" : t.type === "采集" ? "collect" : "edit",
-      )
-    )
+    if (t.type === "标签匹配") {
+      update((s) => retryTagMatching(s, id));
+      return;
+    }
+    if (!can(t.type === "导出" ? "export" : "edit"))
       return toast("当前角色不能重试该任务。");
     if (t.type === "导出")
       return toast("请从导出窗口重新生成文件包，原错误已保留。");
@@ -202,6 +208,10 @@ export function CMSProvider({ children }: { children: ReactNode }) {
       update((s) => {
         for (const previous of due) {
           const task = s.tasks.find((t) => t.id === previous.id)!;
+          if (task.type === "标签匹配") {
+            advanceTagMatching(s, task);
+            continue;
+          }
           task.finishAt = undefined;
           task.status = task.items.some(
             (i) => i.status === "失败" || i.status === "部分失败",
@@ -311,7 +321,9 @@ export function CMSProvider({ children }: { children: ReactNode }) {
             id: uid("notice"),
             title: `${task.name}已完成`,
             detail: "查看处理结果。",
-            route: "tasks",
+            route: task.items[0]?.assetId
+              ? `content/${task.items[0].assetId}`
+              : "library",
             read: false,
             at: now(),
           });

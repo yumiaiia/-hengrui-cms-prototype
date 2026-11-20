@@ -63,18 +63,15 @@ export function Badge({
 export function PageHeader({
   title,
   description,
-  eyebrow,
   action,
 }: {
   title: string;
   description?: string;
-  eyebrow?: string;
   action?: ReactNode;
 }) {
   return (
     <div className="page-header">
       <div>
-        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
         <h1>{title}</h1>
         {description ? <p>{description}</p> : null}
       </div>
@@ -112,7 +109,7 @@ export function Field({
 }
 export function Empty({
   title = "没有找到内容",
-  description = "试试调整筛选条件，或添加新的内容。",
+  description,
   action,
 }: {
   title?: string;
@@ -125,7 +122,7 @@ export function Empty({
         <Inbox size={30} strokeWidth={1.4} />
       </span>
       <h3>{title}</h3>
-      <p>{description}</p>
+      {description ? <p>{description}</p> : null}
       {action}
     </div>
   );

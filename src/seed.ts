@@ -1,3 +1,4 @@
+import { sampleArticleSource } from "./collectionSources";
 import { convertLegacyTags } from "./migration";
 import { primaryTagId } from "./model";
 import {
@@ -367,6 +368,11 @@ export function seedState(): State {
     articles: [
       {
         id: "article1",
+        sourceUrl: sampleArticleSource({
+          id: "article1",
+          title: titles[8],
+          account: accounts[0],
+        }),
         title: titles[8],
         account: accounts[0],
         publishedAt: day(-2),
@@ -376,6 +382,11 @@ export function seedState(): State {
       },
       {
         id: "article2",
+        sourceUrl: sampleArticleSource({
+          id: "article2",
+          title: "慢病管理学术资讯 · 采集样例",
+          account: accounts[1],
+        }),
         title: "慢病管理学术资讯 · 采集样例",
         account: accounts[1],
         publishedAt: day(-3),
@@ -384,6 +395,11 @@ export function seedState(): State {
       },
       {
         id: "article3",
+        sourceUrl: sampleArticleSource({
+          id: "article3",
+          title: "学术交流文章 · 采集异常样例",
+          account: accounts[2],
+        }),
         title: "学术交流文章 · 采集异常样例",
         account: accounts[2],
         publishedAt: day(-1),
@@ -393,6 +409,11 @@ export function seedState(): State {
       },
       {
         id: "article4",
+        sourceUrl: sampleArticleSource({
+          id: "article4",
+          title: titles[9],
+          account: accounts[3],
+        }),
         title: titles[9],
         account: accounts[3],
         publishedAt: day(-2),
@@ -415,7 +436,7 @@ export function seedState(): State {
         id: "u2",
         name: "医学内容组",
         account: "medical",
-        roleId: "medical",
+        roleId: "operator",
         createdAt: stamp,
       },
       {
@@ -434,7 +455,6 @@ export function seedState(): State {
           "upload",
           "edit",
           "publish",
-          "collect",
           "exempt",
           "tags",
           "taxonomy",
@@ -453,31 +473,9 @@ export function seedState(): State {
         ],
       },
       {
-        id: "medical",
-        name: "医学部高权限用户",
-        permissions: [
-          "upload",
-          "edit",
-          "publish",
-          "collect",
-          "exempt",
-          "tags",
-          "export",
-          "evidence",
-        ],
-        menus: [
-          "workbench",
-          "library",
-          "publishing",
-          "collection",
-          "credentials",
-          "tags",
-        ],
-      },
-      {
         id: "operator",
         name: "普通用户",
-        permissions: ["upload", "edit", "publish", "collect", "tags", "export"],
+        permissions: ["upload", "edit", "publish", "tags", "export"],
         menus: [
           "workbench",
           "library",

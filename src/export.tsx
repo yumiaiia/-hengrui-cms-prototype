@@ -24,8 +24,6 @@ export function ExportDialog({
   const {
     can,
     state,
-    user,
-    role,
     update,
     notify,
     toast,
@@ -186,10 +184,10 @@ export function ExportDialog({
         title: "内容资产导出包已生成",
         detail: missing.length
           ? "包含导出清单，部分示例资产无原文件，详见 manifest.json。"
-          : "文件与结构化字段已打包，可在任务中心下载。",
-        route: "tasks",
+          : "文件与结构化字段已打包，可在内容库的导出记录下载。",
+        route: "library?exports=1",
       });
-      toast("导出包已生成，请到任务中心下载。");
+      toast("导出包已生成，可在导出记录下载。");
       onClose();
     } catch (e) {
       const reason = e instanceof Error ? e.message : "文件包生成失败";
@@ -264,7 +262,7 @@ export function ExportDialog({
         </span>
       </Field>
       <Note>
-        导出在后台生成，可从任务中心下载。示例文件及无法获取的原始资源会在导出清单中明确标注。
+        导出文件可从内容库的导出记录下载。示例文件及无法获取的原始资源会在导出清单中明确标注。
       </Note>
       {error ? <Note tone="red">{error}</Note> : null}
     </Dialog>

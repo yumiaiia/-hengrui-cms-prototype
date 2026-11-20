@@ -95,9 +95,7 @@ export function TagFilter({
           ))}
         </div>
         {!tags.length ? <p className="muted">没有匹配标签。</p> : null}
-        <div className="popover-hint">
-          同类标签满足任一个，不同类别同时满足。
-        </div>
+
       </div>
     </details>
   );

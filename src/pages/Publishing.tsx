@@ -1,10 +1,13 @@
+import {
+  normalizePublicationStatus,
+  publicationStatuses,
+} from "../simplification";
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowLeft,
   ArrowUpRight,
   CalendarClock,
-  Check,
   Copy,
   ExternalLink,
   Image as ImageIcon,
@@ -73,7 +76,9 @@ export default function Publishing({
       : []);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(
-    !embedded ? params.get("status") || "" : "",
+    !embedded && params.get("status")
+      ? normalizePublicationStatus(params.get("status")!)
+      : "",
   );
   const [selected, setSelected] = useState(
     initialOpen || (!embedded ? params.get("open") || "" : ""),
@@ -143,10 +148,7 @@ export default function Publishing({
   });
   const rows = publications.filter(
     (p) =>
-      (!status ||
-        (status === "需处理"
-          ? ["处理失败", "状态待确认"].includes(p.status)
-          : p.status === status)) &&
+      (!status || p.status === status) &&
       [
         p.title,
         assets.find((a) => a.id === p.assetId)?.code,
@@ -156,17 +158,7 @@ export default function Publishing({
         .toLowerCase()
         .includes(search.trim().toLowerCase()),
   );
-  const counts = [
-    "全部",
-    "需处理",
-    "草稿",
-    "已提交",
-    "下游处理中",
-    "待发布",
-    "已发布",
-    "处理失败",
-    "状态待确认",
-  ];
+  const counts = ["全部", ...publicationStatuses];
   function closeEditor() {
     setEditing(false);
     if (embedded && !selected) onClose?.();
@@ -255,17 +247,16 @@ export default function Publishing({
       setError(e instanceof Error ? e.message : "保存失败，请重试。");
     }
   }
-  function feedback(result: "preview" | "published" | "failed" | "processing") {
+  function feedback(result: "preview" | "published" | "failed") {
     if (!detail || !can("publish") || detail.status === "已发布") return;
     const ok = update((s) => {
       const p = s.publications!.find((p) => p.id === detail.id)!;
       p.updatedAt = now();
       p.error = undefined;
       if (result === "failed") {
-        p.status = "处理失败";
+        p.status = "发布失败";
         p.error = "发布平台反馈：封面资源获取失败，请核对后重新提交。";
-      } else if (result === "processing") p.status = "下游处理中";
-      else {
+      } else {
         p.status = result === "published" ? "已发布" : "待发布";
         p.previews = ["微网站", "企微端", "微信端"].map((port, i) => ({
           id: `${p.id}-${p.revision}-${i}`,
@@ -298,11 +289,7 @@ export default function Publishing({
               <span>
                 {s === "全部"
                   ? publications.length
-                  : publications.filter((p) =>
-                      s === "需处理"
-                        ? ["处理失败", "状态待确认"].includes(p.status)
-                        : p.status === s,
-                    ).length}
+                  : publications.filter((p) => p.status === s).length}
               </span>
             </button>
           ))}
@@ -392,7 +379,6 @@ export default function Publishing({
         <div className="publishing-page">
           <PageHeader
             title="发布管理"
-            description="查看发布排期、发布预览与平台反馈。"
             action={
               <Button
                 variant="primary"
@@ -404,21 +390,6 @@ export default function Publishing({
               </Button>
             }
           />
-          <div className="publish-summary">
-            {[
-              { label: "待发布", icon: <CalendarClock size={20} /> },
-              { label: "已发布", icon: <Check size={20} /> },
-              { label: "处理失败", icon: <X size={20} /> },
-            ].map((item) => (
-              <button key={item.label} onClick={() => setStatus(item.label)}>
-                {item.icon}
-                <span>{item.label}</span>
-                <strong>
-                  {publications.filter((p) => p.status === item.label).length}
-                </strong>
-              </button>
-            ))}
-          </div>
           {list}
         </div>
       ) : !detail && !editing ? (
@@ -580,7 +551,6 @@ export default function Publishing({
               <summary>演示发布反馈</summary>
               <p>原型演示，不会向外部平台发送内容。</p>
               <div className="actions">
-                <Button onClick={() => feedback("processing")}>处理中</Button>
                 <Button onClick={() => feedback("preview")}>
                   返回发布预览
                 </Button>

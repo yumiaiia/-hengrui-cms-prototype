@@ -102,7 +102,7 @@ describe("批量发布与版本快照", () => {
     expect(p.snapshot).toBeUndefined();
     expect(p.status).toBe("草稿");
     saveReleaseBatch(s, [releaseInput(a)], future(), true, id);
-    expect(p.status).toBe("已提交");
+    expect(p.status).toBe("待发布");
     expect(p.snapshot?.number).toBe(2);
   });
   it("CSV 五个分类已导入，联动示例每页标签不同", () => {

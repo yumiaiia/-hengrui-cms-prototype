@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   Send,
@@ -9,16 +9,7 @@ import {
   Download,
   Upload,
   History,
-  FileText,
-  Maximize,
-  Edit3,
   RotateCw,
-  ChevronLeft,
-  ChevronRight,
-  ZoomIn,
-  ZoomOut,
-  ExternalLink,
-  ArchiveX,
 } from "lucide-react";
 import { useCMS } from "../store";
 import {
@@ -42,7 +33,6 @@ import {
   Field,
   Note,
   PageHeader,
-  Tabs,
 } from "../components/ui";
 import { TagPanel } from "../components/TagPanel";
 import { ApprovalEditor } from "../components/ApprovalEditor";
@@ -50,7 +40,7 @@ import { ExportDialog } from "../export";
 import { DocumentReader, PageCanvas } from "../components/DocumentReader";
 import { failedPages, paginated, pageState } from "../workflow";
 export default function ContentDetail({ id }: { id: string }) {
-  const { state, assets, can, update, toast, retryTask } = useCMS();
+  const { state, assets, can, update, toast } = useCMS();
   const asset = assets.find((a) => a.id === id);
   const params = new URLSearchParams(location.hash.split("?")[1]);
   const [number, setNumber] = useState(
@@ -349,6 +339,26 @@ export default function ContentDetail({ id }: { id: string }) {
           </Button>
         </Note>
       ) : null}
+      {v.process === "完成" && v.tagStatus === "失败" ? (
+        <Note tone="amber">
+          <span>
+            材料打标失败
+            {task?.items.find((i) => i.assetId === id && i.version === number)
+              ?.error
+              ? `：${task.items.find((i) => i.assetId === id && i.version === number)?.error}`
+              : ""}
+          </span>
+          <Button disabled={!editable} onClick={reparse}>
+            重新识别标签
+          </Button>
+        </Note>
+      ) : null}
+      {["排队中", "处理中"].includes(v.process) ||
+      ["待打标", "打标中"].includes(v.tagStatus) ? (
+        <div className="note" role="status">
+          文件解析：{v.process} · 标签识别：{v.tagStatus}
+        </div>
+      ) : null}
       <div className="detail-material-tags panel">
         <div>
           <Tags size={17} />
@@ -417,11 +427,6 @@ export default function ContentDetail({ id }: { id: string }) {
           <aside className="page-tags-panel panel">
             <div className="page-tag-heading">
               <div>
-                <span className="eyebrow">
-                  {paginated(v)
-                    ? `当前页 · ${page} / ${pageCount || v.pages}`
-                    : "当前内容"}
-                </span>
                 <h2>{paginated(v) ? `第 ${page} 页标签` : "内容标签"}</h2>
               </div>
               <Badge>
@@ -435,7 +440,7 @@ export default function ContentDetail({ id }: { id: string }) {
             {pageState(v, page).status === "失败" ? (
               <div className="page-tag-error">
                 <strong>这一页打标失败</strong>
-                <p>文件解析正常，可重新打标，或手动添加后标记完成。</p>
+
                 <Button
                   disabled={
                     !can("tags") ||

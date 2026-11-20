@@ -536,7 +536,6 @@ export default function Credentials() {
   return (
     <div className="ops-page">
       <PageHeader
-        eyebrow="APPROVAL EVIDENCE"
         title="审批凭证"
         description="一个编号管理一组审批截图；修订可追溯，内容版本保留独立快照。"
         action={

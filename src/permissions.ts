@@ -65,14 +65,8 @@ export const permissionModules: PermissionModule[] = [
   {
     key: "collection",
     label: "公众号采集",
-    description: "查看固定公众号文章、来源预览和更新记录",
-    actions: [
-      {
-        key: "collect",
-        label: "处理文章更新",
-        description: "确认采集更新并创建内容新版本",
-      },
-    ],
+    description: "查看公众号文章与采集结果",
+    actions: [],
   },
   {
     key: "tags",
