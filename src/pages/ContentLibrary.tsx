@@ -1,3 +1,4 @@
+import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { TagFilter } from "../components/TagFilter";
 import { lazy, useEffect, useMemo, useState } from "react";
 import {
@@ -393,6 +394,7 @@ export default function ContentLibrary() {
               onClick={() => setRelease({ ids: selected })}
             >
               批量发布
+              <PhaseTwoNote />
             </Button>
             <Button
               disabled={!can("edit")}
@@ -458,7 +460,10 @@ export default function ContentLibrary() {
                   <th>材料标签</th>
                   <th>审批信息</th>
                   <th>有效状态</th>
-                  <th>发布</th>
+                  <th>
+                    发布
+                    <PhaseTwoNote />
+                  </th>
                   <th>最近更新</th>
                   <th />
                 </tr>
@@ -601,6 +606,7 @@ export default function ContentLibrary() {
                             onClick={() => setRelease({ ids: [a.id] })}
                           >
                             提交发布
+                            <PhaseTwoNote />
                           </Button>
                         )}
                       </td>

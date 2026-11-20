@@ -305,10 +305,10 @@ export default function Publishing({
           <table className="data-table">
             <thead>
               <tr>
-                <th>发布内容</th>
-                <th>发布状态</th>
-                <th>拟发布时间</th>
-                <th>发布预览</th>
+                <th>发布内容（二期功能）</th>
+                <th>发布状态（二期功能）</th>
+                <th>拟发布时间（二期功能）</th>
+                <th>发布预览（二期功能）</th>
                 <th>最近反馈</th>
                 <th>操作</th>
               </tr>
@@ -378,7 +378,7 @@ export default function Publishing({
       {!embedded ? (
         <div className="publishing-page">
           <PageHeader
-            title="发布管理"
+            title="发布管理（二期功能）"
             action={
               <Button
                 variant="primary"
@@ -386,21 +386,21 @@ export default function Publishing({
                 disabled={!can("publish")}
                 onClick={() => start()}
               >
-                新建发布
+                新建发布（二期功能）
               </Button>
             }
           />
           {list}
         </div>
       ) : !detail && !editing ? (
-        <Dialog wide title="发布记录" onClose={() => onClose?.()}>
+        <Dialog wide title="发布记录（二期功能）" onClose={() => onClose?.()}>
           {list}
         </Dialog>
       ) : null}
       {detail && !editing ? (
         <Dialog
           drawer
-          title="发布详情"
+          title="发布详情（二期功能）"
           onClose={() => {
             setSelected("");
             if (embedded && !assetFilter) onClose?.();
@@ -453,7 +453,7 @@ export default function Publishing({
           <div className="release-schedule">
             <CalendarClock size={24} />
             <div>
-              <small>拟发布时间 · 北京时间</small>
+              <small>拟发布时间 · 北京时间（二期功能）</small>
               <strong>
                 {detail.plannedAt
                   ? new Date(detail.plannedAt).toLocaleString("zh-CN", {
@@ -468,7 +468,7 @@ export default function Publishing({
             <div className="inline-warning">{detail.error}</div>
           ) : null}
           <div className="section-heading">
-            <h3>发布预览</h3>
+            <h3>发布预览（二期功能）</h3>
           </div>
           {detail.previews.length ? (
             detail.previews.map((p) => (
@@ -534,7 +534,7 @@ export default function Publishing({
             <dd>
               {detail.submittedAt ? dateLabel(detail.submittedAt) : "尚未提交"}
             </dd>
-            <dt>发布人</dt>
+            <dt>发布人（二期功能）</dt>
             <dd>
               {state.users.find((u) => u.id === detail.submittedBy)?.name ||
                 "—"}
@@ -566,7 +566,7 @@ export default function Publishing({
       {editing ? (
         <Dialog
           wide
-          title={editId ? "编辑发布草稿" : "新建发布"}
+          title={editId ? "编辑发布草稿（二期功能）" : "新建发布（二期功能）"}
           onClose={closeEditor}
           footer={
             <>
@@ -849,7 +849,7 @@ export default function Publishing({
           ) : (
             <>
               <div className="release-schedule-field">
-                <Field label="拟发布时间（北京时间）" required>
+                <Field label="拟发布时间（北京时间）（二期功能）" required>
                   <input
                     aria-label="拟发布时间"
                     type="datetime-local"
@@ -956,14 +956,14 @@ export default function Publishing({
                     <p className="muted">
                       已带入内容的标题、摘要与图片。此处修改仅用于本次发布。
                     </p>
-                    <Field label="发布标题" required>
+                    <Field label="发布标题（二期功能）" required>
                       <input
                         aria-label="发布标题"
                         value={active.title}
                         onChange={(e) => patch({ title: e.target.value })}
                       />
                     </Field>
-                    <Field label="摘要（选填）">
+                    <Field label="摘要（选填）（二期功能）">
                       <textarea
                         rows={3}
                         aria-label="发布摘要"
@@ -973,7 +973,7 @@ export default function Publishing({
                     </Field>
                     <div className="release-image-fields">
                       <section>
-                        <Field label="发布封面" required>
+                        <Field label="发布封面（二期功能）" required>
                           <AssetImage
                             className="release-image-preview"
                             src={active.cover}
@@ -999,7 +999,7 @@ export default function Publishing({
                         ) : null}
                       </section>
                       <section>
-                        <Field label="缩略图" required>
+                        <Field label="缩略图（二期功能）" required>
                           <AssetImage
                             className="release-image-preview"
                             src={active.thumbnail}
@@ -1059,7 +1059,7 @@ export default function Publishing({
         />
       ) : null}
       {qr ? (
-        <Dialog title="扫码查看发布预览" onClose={() => setQr("")}>
+        <Dialog title="扫码查看发布预览（二期功能）" onClose={() => setQr("")}>
           <div className="qr-preview">
             <QRCodeSVG value={qr} size={220} />
             <p>使用手机扫描二维码查看预览。</p>
@@ -1105,7 +1105,9 @@ export function PublicationPreview({ id }: { id: string }) {
         <ArrowLeft size={16} />
         返回发布详情
       </button>
-      <div className="preview-port-label">瑞医空间 · {port} · 原型预览</div>
+      <div className="preview-port-label">
+        瑞医空间 · {port} · 原型预览（二期功能）
+      </div>
       <article>
         <AssetImage src={p.cover} alt="发布封面" />
         <h1>{p.title}</h1>

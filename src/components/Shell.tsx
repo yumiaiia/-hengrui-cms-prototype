@@ -16,6 +16,7 @@ import {
   Send,
   CheckCheck,
 } from "lucide-react";
+import { PhaseTwoNote } from "./PhaseTwoNote";
 import { useCMS } from "../store";
 import { go, dateLabel } from "../model";
 import { Dialog, Badge, Button, Empty } from "./ui";
@@ -80,12 +81,19 @@ export default function Shell({
             .map((m) => (
               <button
                 key={m.id}
-                title={collapsed ? m.name : undefined}
+                title={
+                  collapsed
+                    ? m.name + (m.id === "publishing" ? "（二期功能）" : "")
+                    : undefined
+                }
                 className={`nav-item ${active === m.id ? "active" : ""}`}
                 onClick={() => go(m.id)}
               >
                 <m.icon size={19} strokeWidth={1.7} />
-                <span>{m.name}</span>
+                <span>
+                  {m.name}
+                  {m.id === "publishing" ? <PhaseTwoNote /> : null}
+                </span>
                 {m.id === "library" ? <b>{assets.length}</b> : null}
               </button>
             ))}
@@ -124,6 +132,7 @@ export default function Shell({
             工作空间 <span>/</span>
             <strong>
               {menu.find((m) => m.id === active)?.name || "内容管理"}
+              {active === "publishing" ? <PhaseTwoNote /> : null}
             </strong>
           </div>
           <button

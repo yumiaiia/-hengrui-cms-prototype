@@ -52,12 +52,12 @@ export const permissionModules: PermissionModule[] = [
   },
   {
     key: "publishing",
-    label: "发布管理",
+    label: "发布管理（二期功能）",
     description: "查看发布记录、拟发布时间、状态与发布预览",
     actions: [
       {
         key: "publish",
-        label: "创建与提交发布",
+        label: "创建与提交发布（二期功能）",
         description: "选择内容、编辑发布草稿、提交发布；不包含内容和审批编辑",
       },
     ],

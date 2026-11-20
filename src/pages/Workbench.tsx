@@ -1,3 +1,4 @@
+import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { useState } from "react";
 import {
   ArrowUpRight,
@@ -122,7 +123,10 @@ export default function Workbench() {
               {failed.length}
               <small>条记录</small>
             </div>
-            <strong>发布失败</strong>
+            <strong>
+              发布失败
+              <PhaseTwoNote />
+            </strong>
           </button>
         ) : null}
       </div>
@@ -230,7 +234,10 @@ export default function Workbench() {
           <aside className="panel workbench-schedule">
             <div className="panel-heading">
               <div>
-                <h2>近期发布</h2>
+                <h2>
+                  近期发布
+                  <PhaseTwoNote />
+                </h2>
               </div>
               <CalendarClock size={19} />
             </div>
@@ -258,7 +265,8 @@ export default function Workbench() {
               </div>
             )}
             <button className="task-bottom" onClick={() => go("publishing")}>
-              进入发布管理 <ArrowRight size={14} />
+              进入发布管理
+              <PhaseTwoNote /> <ArrowRight size={14} />
             </button>
           </aside>
         ) : null}

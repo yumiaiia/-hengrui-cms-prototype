@@ -1,3 +1,4 @@
+import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -271,6 +272,7 @@ export default function ContentDetail({ id }: { id: string }) {
               onClick={() => go(`publishing?asset=${id}&create=1`)}
             >
               提交发布
+              <PhaseTwoNote />
             </Button>
           </>
         }
@@ -309,7 +311,8 @@ export default function ContentDetail({ id }: { id: string }) {
             版本历史
           </Button>
           <Button variant="ghost" onClick={() => go(`publishing?asset=${id}`)}>
-            发布记录（
+            发布记录
+            <PhaseTwoNote />（
             {(state.publications || []).filter((p) => p.assetId === id).length}
             ）
           </Button>

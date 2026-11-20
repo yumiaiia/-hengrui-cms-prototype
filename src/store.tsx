@@ -1,4 +1,9 @@
 import { prepareSimplification } from "./simplification";
+import {
+  prepareCollection,
+  advanceCollectionQueue,
+  collectionQueueDue,
+} from "./collection";
 import { advanceTagMatching, retryTagMatching } from "./tagMatching";
 import { prepareRecommendations } from "./recommendations";
 import { prepareAdministration } from "./administration";
@@ -58,9 +63,11 @@ function initial() {
     const raw = localStorage.getItem(key);
     if (raw) {
       const original = JSON.parse(raw);
-      const migrated = prepareSimplification(
-        prepareRecommendations(
-          prepareAdministration(prepareWorkspace(migrateState(original))),
+      const migrated = prepareCollection(
+        prepareSimplification(
+          prepareRecommendations(
+            prepareAdministration(prepareWorkspace(migrateState(original))),
+          ),
         ),
       );
       if (original.schema === 1) {
@@ -74,9 +81,11 @@ function initial() {
   } catch (error) {
     loadFailure = error instanceof Error ? error.message : "原型数据无法读取";
   }
-  return prepareSimplification(
-    prepareRecommendations(
-      prepareAdministration(prepareWorkspace(seedState())),
+  return prepareCollection(
+    prepareSimplification(
+      prepareRecommendations(
+        prepareAdministration(prepareWorkspace(seedState())),
+      ),
     ),
   );
 }
@@ -163,6 +172,7 @@ export function CMSProvider({ children }: { children: ReactNode }) {
   const retryTask = (id: string) => {
     const t = state.tasks.find((t) => t.id === id);
     if (!t) return;
+    if (t.type === "采集") return;
     if (t.type === "标签匹配") {
       update((s) => retryTagMatching(s, id));
       return;
@@ -202,10 +212,16 @@ export function CMSProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const timer = setInterval(() => {
       const due = ref.current.tasks.filter(
-        (t) => t.finishAt && t.finishAt <= Date.now() && t.status === "处理中",
+        (t) =>
+          t.type !== "采集" &&
+          t.finishAt &&
+          t.finishAt <= Date.now() &&
+          t.status === "处理中",
       );
-      if (!due.length) return;
+      const collectionDue = collectionQueueDue(ref.current);
+      if (!due.length && !collectionDue) return;
       update((s) => {
+        if (collectionDue) advanceCollectionQueue(s);
         for (const previous of due) {
           const task = s.tasks.find((t) => t.id === previous.id)!;
           if (task.type === "标签匹配") {

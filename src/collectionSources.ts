@@ -1,6 +1,6 @@
 import { type Article, type Asset } from "./model";
 
-// These fixtures are local source pages for the four fictional seed articles.
+// These fixtures are local source pages for fictional seed articles, including old data.
 // Never infer a real WeChat URL from a title or attach fixtures to user records.
 const sampleArticles = [
   {
@@ -15,6 +15,7 @@ const sampleArticles = [
   },
   { id: "article3", title: "学术交流文章 · 采集异常样例", account: "爱医时空" },
   { id: "article4", title: "眼科研究进展 · 内容更新", account: "爱眼医时空" },
+  { id: "article4", title: "眼科研究进展 · 公众号文章", account: "爱眼医时空" },
 ];
 
 export function sampleArticleSource(

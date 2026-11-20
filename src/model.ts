@@ -178,6 +178,14 @@ export interface Task {
   finishAt?: number;
   artifactKey?: string;
   artifactName?: string;
+  collection?: {
+    number: string;
+    account: string;
+    trigger: string;
+    startedAt?: string;
+    addedArticles: number;
+    simulated?: boolean;
+  };
 }
 export interface Article {
   sourceUrl?: string;
@@ -187,6 +195,7 @@ export interface Article {
   account: string;
   publishedAt: string;
   checkedAt: string;
+  // Legacy values are read only for migration. New article rows must contain a body.
   status: "成功" | "失败" | "发现更新" | "未变化";
   assetId?: string;
   error?: string;
@@ -246,6 +255,7 @@ export interface State {
   workspaceRevision?: number;
   administrationRevision?: number;
   simplificationRevision?: number;
+  collectionRevision?: number;
 }
 export const now = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;

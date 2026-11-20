@@ -40,7 +40,7 @@ describe("精简数据迁移", () => {
     });
     s.articles[1].sourceUrl = "https://mp.weixin.qq.com/s/existing-source";
     s.articles.push({
-      ...s.articles[2],
+      ...s.articles[0],
       id: "user-article",
       title: "用户文章",
     });

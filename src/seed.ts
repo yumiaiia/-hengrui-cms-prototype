@@ -1,4 +1,5 @@
 import { sampleArticleSource } from "./collectionSources";
+import { sampleCollectionTasks } from "./collection";
 import { convertLegacyTags } from "./migration";
 import { primaryTagId } from "./model";
 import {
@@ -44,7 +45,7 @@ const titles = [
   "临床研究证据资料",
   "医学部学术资料精选",
   "免疫疾病诊疗资讯 · 公众号文章",
-  "眼科研究进展 · 内容更新",
+  "眼科研究进展 · 公众号文章",
 ];
 const kinds: Kind[] = [
   "PDF",
@@ -318,6 +319,7 @@ export function seedState(): State {
       },
     ],
     tasks: [
+      ...sampleCollectionTasks(stamp),
       {
         id: "task1",
         name: "研究摘要 · 自动打标",
@@ -381,33 +383,6 @@ export function seedState(): State {
         assetId: "a9",
       },
       {
-        id: "article2",
-        sourceUrl: sampleArticleSource({
-          id: "article2",
-          title: "慢病管理学术资讯 · 采集样例",
-          account: accounts[1],
-        }),
-        title: "慢病管理学术资讯 · 采集样例",
-        account: accounts[1],
-        publishedAt: day(-3),
-        checkedAt: stamp,
-        status: "未变化",
-      },
-      {
-        id: "article3",
-        sourceUrl: sampleArticleSource({
-          id: "article3",
-          title: "学术交流文章 · 采集异常样例",
-          account: accounts[2],
-        }),
-        title: "学术交流文章 · 采集异常样例",
-        account: accounts[2],
-        publishedAt: day(-1),
-        checkedAt: stamp,
-        status: "失败",
-        error: "文章访问受限，未获取正文。本地演示可重试采集。",
-      },
-      {
         id: "article4",
         sourceUrl: sampleArticleSource({
           id: "article4",
@@ -418,10 +393,8 @@ export function seedState(): State {
         account: accounts[3],
         publishedAt: day(-2),
         checkedAt: stamp,
-        status: "发现更新",
+        status: "成功",
         assetId: "a10",
-        before: "研究资料包含背景、初步证据和适用范围。",
-        after: "研究资料包含背景、补充证据、资料来源和更新后的适用范围。",
       },
     ],
     users: [
