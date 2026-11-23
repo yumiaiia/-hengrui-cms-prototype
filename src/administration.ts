@@ -1,11 +1,6 @@
 import { moduleForPermission } from "./permissions";
-import {
-  now,
-  uid,
-  permissionNames,
-  type Role,
-  type State,
-} from "./model";
+import { normalizeEmployeeId, prepareEmployeeIdentity } from "./userIdentity";
+import { now, uid, permissionNames, type Role, type State } from "./model";
 export const superRoleId = "admin";
 export const superUserId = "u1";
 export const menuOptions = [
@@ -16,7 +11,6 @@ export const menuOptions = [
   { key: "tags", label: "标签管理" },
   { key: "admin", label: "系统管理" },
 ];
-export const normalizeEmail = (value: string) => value.trim().toLowerCase();
 export const hasAdminAccess = (role?: Role) =>
   !!role?.permissions.includes("admin") && role.menus.includes("admin");
 function assertAdmin(s: State) {
@@ -30,7 +24,7 @@ function assertAdmin(s: State) {
 }
 export function saveManagedUser(
   s: State,
-  input: { id?: string; name: string; account: string; roleId: string },
+  input: { id?: string; name: string; employeeId: string; roleId: string },
 ) {
   assertAdmin(s);
   const old = s.users.find((u) => u.id === input.id);
@@ -38,27 +32,33 @@ export function saveManagedUser(
     throw new Error("超级管理员账号为系统保留，不能修改。");
   if (input.id && !old) throw new Error("用户已不存在。");
   const name = input.name.trim(),
-    account = normalizeEmail(input.account);
+    employeeId = normalizeEmployeeId(input.employeeId);
   if (!name) throw new Error("请输入姓名。");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account))
-    throw new Error("请输入有效的邮箱地址。");
+  if (
+    !employeeId ||
+    employeeId.length > 64 ||
+    /[\s@\u0000-\u001f\u007f]/u.test(employeeId)
+  )
+    throw new Error("请输入有效的工号（不超过 64 个字符，不能包含空格或 @）。");
   if (
     s.users.some(
-      (u) => u.id !== input.id && normalizeEmail(u.account) === account,
+      (u) =>
+        u.id !== input.id &&
+        normalizeEmployeeId(u.employeeId || "") === employeeId,
     )
   )
-    throw new Error("该邮箱已存在，请使用其他邮箱；停用账号的邮箱也不能重复。");
+    throw new Error("该工号已存在，请使用其他工号；停用账号的工号也不能重复。");
   const role = s.roles.find((r) => r.id === input.roleId);
   if (!role || role.id === superRoleId)
     throw new Error("请选择自建角色；超级管理员角色不可分配。");
   if (old?.id === s.userId && !hasAdminAccess(role))
     throw new Error("不能撤销当前账号的管理入口，请由其他管理员调整。");
-  if (old) Object.assign(old, { name, account, roleId: role.id });
+  if (old) Object.assign(old, { name, employeeId, roleId: role.id });
   else
     s.users.push({
       id: uid("user"),
       name,
-      account,
+      employeeId,
       roleId: role.id,
       createdAt: now(),
       enabled: true,
@@ -120,7 +120,7 @@ export function deleteManagedRole(s: State, id: string) {
   s.roles = s.roles.filter((r) => r.id !== id);
 }
 export function prepareAdministration(s: State) {
-  if (s.administrationRevision === 3) return s;
+  if (s.administrationRevision === 3) return prepareEmployeeIdentity(s);
   const next = structuredClone(s);
   for (const role of next.roles) {
     role.menus = role.menus.filter((m) =>
@@ -155,30 +155,12 @@ export function prepareAdministration(s: State) {
     superRole.permissions = Object.keys(permissionNames) as Role["permissions"];
     superRole.menus = menuOptions.map((m) => m.key);
   }
-  const used = new Set(
-    next.users
-      .filter((u) => u.account.includes("@"))
-      .map((u) => normalizeEmail(u.account)),
-  );
-  for (const u of next.users) {
-    if (!u.account.includes("@")) {
-      const base =
-        u.id === superUserId
-          ? "admin"
-          : u.account.replace(/[^a-z\d._-]/gi, "") || u.id;
-      let email = `${base}@hengrui.example.com`;
-      let i = 1;
-      while (used.has(email)) email = `${base}-${i++}@hengrui.example.com`;
-      u.account = email;
-      used.add(email);
-    } else u.account = normalizeEmail(u.account);
-    u.enabled ??= true;
-  }
+  for (const u of next.users) u.enabled ??= true;
   const admin = next.users.find((u) => u.id === superUserId);
   if (admin) {
     admin.roleId = superRoleId;
     admin.enabled = true;
   }
   next.administrationRevision = 3;
-  return next;
+  return prepareEmployeeIdentity(next);
 }

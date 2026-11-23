@@ -45,7 +45,7 @@ import "./admin.css";
 interface UserDraft {
   id?: string;
   name: string;
-  account: string;
+  employeeId: string;
   roleId: string;
 }
 export default function Administration() {
@@ -74,7 +74,7 @@ export default function Administration() {
       />
     );
   const filteredUsers = state.users.filter((u) =>
-    `${u.name} ${u.account} ${state.roles.find((r) => r.id === u.roleId)?.name}`
+    `${u.name} ${u.employeeId || ""} ${state.roles.find((r) => r.id === u.roleId)?.name}`
       .toLowerCase()
       .includes(userSearch.trim().toLowerCase()),
   );
@@ -89,10 +89,10 @@ export default function Administration() {
         ? {
             id: item.id,
             name: item.name,
-            account: item.account,
+            employeeId: item.employeeId || "",
             roleId: item.roleId,
           }
-        : { name: "", account: "", roleId: "" },
+        : { name: "", employeeId: "", roleId: "" },
     );
   }
   function editRole(item?: Role) {
@@ -121,7 +121,7 @@ export default function Administration() {
       if (ok) {
         setUserDraft(null);
         toast(
-          userDraft.id ? "用户信息已保存。" : "账号已创建，可使用该邮箱登录。",
+          userDraft.id ? "用户信息已保存。" : "账号已创建，可使用该工号登录。",
         );
       }
     } catch (e) {
@@ -191,7 +191,7 @@ export default function Administration() {
             <SearchBox
               value={userSearch}
               onChange={setUserSearch}
-              placeholder="搜索姓名、邮箱或角色"
+              placeholder="搜索姓名、工号或角色"
             />
             <Button
               variant="primary"
@@ -207,7 +207,7 @@ export default function Administration() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>姓名 / 邮箱</th>
+                    <th>姓名 / 工号</th>
                     <th>角色</th>
                     <th>状态</th>
                     <th>创建时间</th>
@@ -228,7 +228,7 @@ export default function Administration() {
                             <Badge tone="blue">当前账号</Badge>
                           ) : null}
                           <small className="row-secondary">
-                            {item.account}
+                            {item.employeeId || "待补充工号"}
                           </small>
                         </td>
                         <td>
@@ -288,7 +288,7 @@ export default function Administration() {
           ) : (
             <Empty
               title="没有匹配的账号"
-              description="调整姓名、邮箱或角色关键词。"
+              description="调整姓名、工号或角色关键词。"
             />
           )}
         </section>
@@ -418,18 +418,18 @@ export default function Administration() {
                 }}
               />
             </Field>
-            <Field label="邮箱" required>
+            <Field label="工号" required>
               <input
-                aria-label="账号邮箱"
-                type="email"
+                aria-label="账号工号"
+                type="text"
                 required
-                maxLength={254}
+                maxLength={64}
                 autoComplete="off"
-                placeholder="name@company.com"
-                value={userDraft.account}
+                placeholder="请输入工号"
+                value={userDraft.employeeId}
                 onChange={(e) => {
                   setUserError("");
-                  setUserDraft({ ...userDraft, account: e.target.value });
+                  setUserDraft({ ...userDraft, employeeId: e.target.value });
                 }}
               />
             </Field>

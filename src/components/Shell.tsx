@@ -166,7 +166,7 @@ export default function Shell({
                       },
                       {
                         action: "退出演示账号",
-                        object: user?.account || "",
+                        object: user?.employeeId || "",
                         category: "系统",
                       },
                     );

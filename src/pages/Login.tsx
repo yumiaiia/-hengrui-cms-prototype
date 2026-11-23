@@ -3,61 +3,64 @@ import { useState, type FormEvent } from "react";
 import { Button, Field } from "../components/ui";
 import { go, now, uid, type User } from "../model";
 import { useCMS } from "../store";
+import { findUserByEmployeeId } from "../userIdentity";
 import "./admin.css";
 
 const demoRoles = [
   {
     roleId: "admin",
-    account: "chenlili",
+    employeeId: "000001",
     label: "超级管理员",
   },
   {
     roleId: "operator",
-    account: "operator",
+    employeeId: "000003",
     label: "内容运营",
   },
 ];
 
 export default function Login() {
   const { state, update, toast } = useCMS();
-  const [account, setAccount] = useState(
+  const [employeeId, setEmployeeId] = useState(
     () =>
-      state.users.find((user) => user.id === "u1")?.account ||
-      state.users[0]?.account ||
+      state.users.find((user) => user.id === "u1")?.employeeId ||
+      state.users[0]?.employeeId ||
       "",
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const selectedUser = state.users.find(
-    (user) =>
-      user.enabled !== false &&
-      user.account.toLowerCase() === account.trim().toLowerCase(),
-  );
+  const selectedUser = findUserByEmployeeId(state.users, employeeId);
 
-  function roleUser(roleId: string, preferredAccount: string) {
+  function roleUser(roleId: string, preferredEmployeeId: string) {
     if (!state.roles.some((role) => role.id === roleId)) return undefined;
     return (
       state.users.find(
         (user) =>
           user.enabled !== false &&
-          user.account === preferredAccount &&
+          user.employeeId === preferredEmployeeId &&
           user.roleId === roleId,
       ) ||
       state.users.find(
-        (user) => user.enabled !== false && user.roleId === roleId,
+        (user) =>
+          user.enabled !== false && !!user.employeeId && user.roleId === roleId,
       )
     );
   }
 
   function chooseUser(user: User) {
-    setAccount(user.account);
+    setEmployeeId(user.employeeId || "");
     setError("");
   }
 
   function login(user: User | undefined, method: "account" | "sso") {
     if (busy) return;
-    if (!user || user.enabled === false)
-      return setError("请输入已启用账号的邮箱。");
+    if (
+      !user ||
+      !user.employeeId ||
+      findUserByEmployeeId(state.users, user.employeeId)?.id !== user.id
+    )
+      return setError("请选择已启用且已填写工号的账号。");
+    const loginEmployeeId = user.employeeId;
     const assignedRole = state.roles.find((role) => role.id === user.roleId);
     if (!assignedRole)
       return setError("该账号未关联有效角色，请让演示管理员修复角色配置。");
@@ -69,7 +72,7 @@ export default function Login() {
         at: now(),
         user: user.name,
         action: method === "sso" ? "演示企微 SSO 登录" : "平台账号演示登录",
-        object: user.account,
+        object: loginEmployeeId,
         detail: `在当前浏览器切换为「${assignedRole.name}」演示身份。未连接认证服务；演示密码不校验、不保存；不修改账号原有权限。`,
         category: "系统",
       });
@@ -87,26 +90,19 @@ export default function Login() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    login(
-      state.users.find(
-        (user) =>
-          user.enabled !== false &&
-          user.account.toLowerCase() === account.trim().toLowerCase(),
-      ),
-      "account",
-    );
+    login(findUserByEmployeeId(state.users, employeeId), "account");
   }
 
-  const ssoUser = roleUser("operator", "operator");
+  const ssoUser = roleUser("operator", "000003");
   return (
     <main className="cms-login cms-login-simple">
       <section className="cms-login-entry" aria-labelledby="cms-login-title">
         <div className="cms-login-form-wrap">
           <h1 id="cms-login-title">恒瑞 CMS</h1>
           <form onSubmit={submit} className="cms-login-form">
-            <Field label="账号" required error={error || undefined}>
+            <Field label="工号" required error={error || undefined}>
               <select
-                aria-label="登录账号"
+                aria-label="登录工号"
                 value={selectedUser?.id || ""}
                 onChange={(event) => {
                   const user = state.users.find(
@@ -116,13 +112,13 @@ export default function Login() {
                 }}
               >
                 <option value="" disabled>
-                  请选择账号
+                  请选择工号
                 </option>
                 {state.users
                   .filter((u) => u.enabled !== false)
                   .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} · {u.account}
+                    <option key={u.id} value={u.id} disabled={!u.employeeId}>
+                      {u.name} · {u.employeeId || "待补充工号"}
                     </option>
                   ))}
               </select>
@@ -139,7 +135,7 @@ export default function Login() {
           <div className="cms-login-quick">
             <div>
               {demoRoles.map((item) => {
-                const user = roleUser(item.roleId, item.account);
+                const user = roleUser(item.roleId, item.employeeId);
                 return (
                   <button
                     key={item.roleId}

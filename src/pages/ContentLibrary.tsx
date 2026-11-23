@@ -122,7 +122,7 @@ export default function ContentLibrary() {
           a.code,
           v.approval.snapshot?.number,
           state.users.find((u) => u.id === a.ownerId)?.name,
-          state.users.find((u) => u.id === a.ownerId)?.account,
+          state.users.find((u) => u.id === a.ownerId)?.employeeId,
         ]
           .join(" ")
           .toLowerCase();
@@ -156,7 +156,7 @@ export default function ContentLibrary() {
         filters.pageTags,
         "",
         Object.fromEntries(
-          state.users.map((u) => [u.id, `${u.name} ${u.account}`]),
+          state.users.map((u) => [u.id, `${u.name} ${u.employeeId || ""}`]),
         ),
       ),
     [base, state.tags, state.users, filters],

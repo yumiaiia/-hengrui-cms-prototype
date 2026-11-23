@@ -35,56 +35,60 @@ describe("账号与角色管理", () => {
     );
     expect(s.administrationRevision).toBe(3);
   });
-  it("只保留超管为内置保护对象，迁移邮箱保留用户及内容关联", () => {
+  it("只保留超管为内置保护对象，工号标识保留用户及内容关联", () => {
     const before = prepareWorkspace(seedState()),
       s = prepareAdministration(before);
     expect(s.users.map((u) => u.id)).toEqual(before.users.map((u) => u.id));
     expect(s.assets.map((a) => a.ownerId)).toEqual(
       before.assets.map((a) => a.ownerId),
     );
-    expect(s.users.every((u) => u.account.includes("@"))).toBe(true);
+    expect(s.users.every((u) => !!u.employeeId)).toBe(true);
     expect(s.roles.find((r) => r.id === "admin")?.name).toBe("超级管理员");
     expect(prepareAdministration(s)).toBe(s);
   });
-  it("支持创建角色并通过邮箱创建账号，邮箱忽略大小写和两端空格", () => {
+  it("支持创建角色并通过工号创建账号，工号忽略大小写和两端空格", () => {
     const s = setup();
     saveManagedRole(s, role(), true);
     saveManagedUser(s, {
       name: "测试用户",
-      account: " Editor@Example.com ",
+      employeeId: " hr00123 ",
       roleId: "custom-role",
     });
-    expect(s.users.at(-1)?.account).toBe("editor@example.com");
+    expect(s.users.at(-1)?.employeeId).toBe("HR00123");
     expect(() =>
       saveManagedUser(s, {
         name: "另一用户",
-        account: "EDITOR@example.com",
+        employeeId: "HR00123",
         roleId: "custom-role",
       }),
-    ).toThrow("邮箱已存在");
+    ).toThrow("工号已存在");
   });
-  it("拒绝非邮箱账号和分配超级管理员角色", () => {
+  it("拒绝空工号和分配超级管理员角色", () => {
     const s = setup();
     expect(() =>
       saveManagedUser(s, {
         name: "用户",
-        account: "username",
+        employeeId: "",
         roleId: "operator",
       }),
-    ).toThrow("邮箱地址");
+    ).toThrow("有效的工号");
     expect(() =>
       saveManagedUser(s, {
         name: "用户",
-        account: "user@example.com",
+        employeeId: "000012",
         roleId: "admin",
       }),
     ).toThrow("不可分配");
   });
   it("超管账号与角色不能编辑、停用或删除", () => {
     const s = setup();
-    expect(() => saveManagedUser(s, { ...s.users[0], name: "其他" })).toThrow(
-      "系统保留",
-    );
+    expect(() =>
+      saveManagedUser(s, {
+        ...s.users[0],
+        employeeId: s.users[0].employeeId!,
+        name: "其他",
+      }),
+    ).toThrow("系统保留");
     expect(() => setUserEnabled(s, "u1", false)).toThrow("不能停用");
     expect(() => saveManagedRole(s, { ...s.roles[0], name: "其他" })).toThrow(
       "系统保留",
@@ -97,7 +101,7 @@ describe("账号与角色管理", () => {
     saveManagedRole(s, { ...role(), name: "医学编辑" });
     saveManagedUser(s, {
       name: "用户",
-      account: "a@example.com",
+      employeeId: "000010",
       roleId: "custom-role",
     });
     const u = s.users.at(-1)!;
@@ -106,11 +110,11 @@ describe("账号与角色管理", () => {
     expect(() =>
       saveManagedUser(s, {
         name: "重复",
-        account: "a@example.com",
+        employeeId: "000010",
         roleId: "operator",
       }),
-    ).toThrow("邮箱已存在");
-    saveManagedUser(s, { ...u, roleId: "operator" });
+    ).toThrow("工号已存在");
+    saveManagedUser(s, { ...u, employeeId: u.employeeId!, roleId: "operator" });
     deleteManagedRole(s, "custom-role");
     expect(s.roles.some((r) => r.id === "custom-role")).toBe(false);
   });
@@ -139,7 +143,7 @@ describe("账号与角色管理", () => {
     expect(() =>
       saveManagedUser(s, {
         name: "用户",
-        account: "b@example.com",
+        employeeId: "000011",
         roleId: "operator",
       }),
     ).toThrow("没有管理权限");

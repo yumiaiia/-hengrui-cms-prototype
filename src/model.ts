@@ -216,7 +216,9 @@ export interface User {
   enabled?: boolean;
   id: string;
   name: string;
-  account: string;
+  employeeId?: string;
+  /** Legacy account retained only for existing data. */
+  account?: string;
   roleId: string;
   createdAt: string;
 }
@@ -255,6 +257,7 @@ export interface State {
   publications?: Publication[];
   workspaceRevision?: number;
   administrationRevision?: number;
+  employeeIdentityRevision?: number;
   simplificationRevision?: number;
   collectionRevision?: number;
   fileProcessingRevision?: number;
