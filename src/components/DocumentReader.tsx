@@ -14,7 +14,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { type Version } from "../model";
 import { loadBlob } from "../storage";
 import { AssetImage, Button, Empty } from "./ui";
-import { paginated, pageState } from "../workflow";
+import { paginated } from "../workflow";
 const documents = new Map<string, Promise<PDFDocumentProxy>>();
 function sourceKey(v: Version) {
   return v.previewUrl || v.fileKey || v.fileUrl || "";
@@ -348,10 +348,7 @@ export function DocumentReader({
               style={{ width: `${zoom}%` }}
             >
               <PageCanvas version={version} page={n} />
-              <span className="sheet-caption">
-                第 {n} 页
-                {pageState(version, n).status === "失败" ? " · 打标失败" : ""}
-              </span>
+              <span className="sheet-caption">第 {n} 页</span>
             </div>
           ))
         ) : version.kind === "视频" ? (

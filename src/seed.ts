@@ -329,7 +329,7 @@ export function seedState(): State {
             version: 1,
             label: titles[2],
             status: "失败",
-            error: "标签识别演示任务失败，可仅重试此项。",
+            error: "文件解析未完成，请重新解析整份文件。",
           },
         ],
         createdAt: stamp,

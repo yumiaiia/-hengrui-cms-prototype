@@ -146,7 +146,7 @@ describe("账号与角色管理", () => {
   });
 });
 describe("工作台待办", () => {
-  it("同一份内容合并多个问题，覆盖材料打标失败、过期和审批待补充", () => {
+  it("同一份内容合并多个问题，覆盖解析失败、过期和审批待补充", () => {
     const s = setup(),
       a = s.assets.find((a) => a.id === "a1")!;
     const v = current(a);
@@ -160,13 +160,16 @@ describe("工作台待办", () => {
       expect.arrayContaining(["approval", "processing", "expiry"]),
     );
   });
-  it("作废内容不进入待办，页级失败定位到具体页面", () => {
+  it("作废内容不进入待办，旧页级失败定位到整份文件", () => {
     const s = setup(),
       a = s.assets.find((a) => a.id === "a1")!;
     const v = current(a);
     v.process = "完成";
     v.pageStates = { 2: { status: "失败" } };
-    expect(contentAttention([a])[0].issues[0].route).toContain("page=2");
+    expect(contentAttention([a])[0].issues[0]).toMatchObject({
+      route: `content/${a.id}`,
+      label: "文件解析失败",
+    });
     a.lifecycle = "已作废";
     expect(contentAttention([a])).toEqual([]);
   });

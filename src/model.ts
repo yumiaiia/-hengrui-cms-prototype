@@ -257,6 +257,7 @@ export interface State {
   administrationRevision?: number;
   simplificationRevision?: number;
   collectionRevision?: number;
+  fileProcessingRevision?: number;
 }
 export const now = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;

@@ -256,7 +256,7 @@ export default function Shell({
               <Badge tone="green">后台处理</Badge>
               <h3>归档后继续工作</h3>
               <p>
-                原文件保存后即归档，解析和打标在后台进行。失败项可在内容详情单独重试，正常标签无需逐条确认。
+                原文件保存后即归档，解析和打标在后台进行。解析失败可在内容列表或详情重新解析整份文件。
               </p>
             </section>
             <section>

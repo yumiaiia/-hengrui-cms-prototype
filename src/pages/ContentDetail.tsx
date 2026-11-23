@@ -6,7 +6,6 @@ import {
   Info,
   ShieldCheck,
   Tags,
-  CheckCircle2,
   Download,
   Upload,
   History,
@@ -20,7 +19,6 @@ import {
   approvalLabel,
   ocrWarnings,
   now,
-  uid,
   go,
 } from "../model";
 import { loadBlob, download } from "../storage";
@@ -39,7 +37,8 @@ import { TagPanel } from "../components/TagPanel";
 import { ApprovalEditor } from "../components/ApprovalEditor";
 import { ExportDialog } from "../export";
 import { DocumentReader, PageCanvas } from "../components/DocumentReader";
-import { failedPages, paginated, pageState } from "../workflow";
+import { paginated } from "../workflow";
+import { fileParsingFailed, reparseFile } from "../fileProcessing";
 export default function ContentDetail({ id }: { id: string }) {
   const { state, assets, can, update, toast } = useCMS();
   const asset = assets.find((a) => a.id === id);
@@ -51,7 +50,6 @@ export default function ContentDetail({ id }: { id: string }) {
     Math.max(1, Number(params.get("page")) || 1),
   );
   const [pageCount, setPageCount] = useState(0);
-  const [pageRetry, setPageRetry] = useState<number>();
   const [modal, setModal] = useState(
     params.get("tab") === "approval" ? "approval-info" : "",
   );
@@ -88,50 +86,22 @@ export default function ContentDetail({ id }: { id: string }) {
     );
   const historical = v.number !== asset.current;
   const editable = can("edit") && !historical && asset.lifecycle === "正常";
-  const task = state.tasks.find((t) =>
-    t.items.some(
-      (i) =>
-        i.assetId === asset.id && i.version === v.number && i.status === "失败",
-    ),
-  );
   const shot = v.approval.snapshot?.evidence[0];
   function reparse() {
-    if (!can("edit") || historical || asset?.lifecycle !== "正常") return;
-    const success = update(
-      (s) => {
-        const a = s.assets.find((a) => a.id === id);
-        if (!a || a.current !== number || a.lifecycle !== "正常") return;
-        const target = current(a);
-        target.process = "处理中";
-        target.tagStatus = "待打标";
-        target.pageStates = Object.fromEntries(
-          Array.from({ length: target.pages }, (_, i) => [
-            i + 1,
-            { status: "待打标" },
-          ]),
-        );
-        s.tasks.unshift({
-          id: uid("task"),
-          name: `${target.title} · 重新解析`,
-          type: "解析与打标",
-          status: "处理中",
-          items: [
-            {
-              assetId: id,
-              version: number,
-              label: target.title,
-              status: "处理中",
-            },
-          ],
-          createdAt: now(),
-          attempts: 1,
-          finishAt: Date.now() + 2200,
-        });
+    let error = "";
+    const saved = update(
+      (draft) => {
+        try {
+          reparseFile(draft, id, number);
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : "重新解析失败";
+        }
       },
       undefined,
       "edit",
     );
-    if (success) toast("正在重新解析整份文件。");
+    if (error) toast(error);
+    else if (saved) toast("正在重新解析整份文件。");
   }
   async function original() {
     if (!can("export")) return toast("没有下载权限");
@@ -140,60 +110,6 @@ export default function ContentDetail({ id }: { id: string }) {
     } catch (e) {
       toast(e instanceof Error ? e.message : "原文件暂不可用");
     }
-  }
-  function markPage(n: number) {
-    if (!can("tags") || historical || asset?.lifecycle !== "正常") return;
-    const ok = update(
-      (s) => {
-        const a = s.assets.find((a) => a.id === id)!;
-        if (a.current !== number || a.lifecycle !== "正常") return;
-        const target = a.versions.find((v) => v.number === number)!;
-        target.pageStates ||= {};
-        target.pageStates[n] = { status: "人工完成" };
-        a.updatedAt = now();
-      },
-      undefined,
-      "tags",
-    );
-    if (ok) toast(`第 ${n} 页已标记为人工处理完成。`);
-  }
-  function retryPage(n: number) {
-    if (!can("tags") || historical || asset?.lifecycle !== "正常") return;
-    setPageRetry(n);
-    const versionNumber = number;
-    window.setTimeout(() => {
-      update(
-        (s) => {
-          const a = s.assets.find((a) => a.id === id);
-          const target = a?.versions.find((v) => v.number === versionNumber);
-          if (
-            !a ||
-            !target ||
-            a.lifecycle !== "正常" ||
-            a.current !== versionNumber
-          )
-            return;
-          target.pageStates ||= {};
-          target.pageStates[n] = { status: "完成" };
-          const tag = s.tags.find(
-            (t) =>
-              t.parentId &&
-              s.tags.find((r) => r.id === t.parentId)?.name === "页面类型" &&
-              t.enabled,
-          );
-          if (
-            tag &&
-            !target.tags.some((b) => b.page === n && b.tagId === tag.id)
-          )
-            target.tags.push({ tagId: tag.id, page: n, origin: "AI" });
-          a.updatedAt = now();
-        },
-        undefined,
-        "tags",
-      );
-      setPageRetry(undefined);
-      toast(`第 ${n} 页标签已重新识别。`);
-    }, 1300);
   }
   function openEdit() {
     setTitle(v!.title);
@@ -296,7 +212,7 @@ export default function ContentDetail({ id }: { id: string }) {
             ))}
           </select>
           <Badge>{expiryStatus(v)}</Badge>
-          <Badge>{v.process}</Badge>
+          <Badge>{fileParsingFailed(v) ? "解析失败" : v.process}</Badge>
           {historical ? <span className="muted">历史版本只读</span> : null}
           {asset.lifecycle === "已作废" ? (
             <Badge tone="red">已作废</Badge>
@@ -326,33 +242,15 @@ export default function ContentDetail({ id }: { id: string }) {
           </Button>
         </div>
       </div>
-      {v.process === "失败" ? (
+      {fileParsingFailed(v) ? (
         <Note tone="amber">
-          <span>
-            文件解析失败，重新解析将处理整份文件。
-            {task?.items.find((i) => i.assetId === id)?.error}
-          </span>
           <Button
             variant="ghost"
             icon={<RotateCw size={15} />}
             disabled={!editable}
             onClick={reparse}
           >
-            重新解析整份文件
-          </Button>
-        </Note>
-      ) : null}
-      {v.process === "完成" && v.tagStatus === "失败" ? (
-        <Note tone="amber">
-          <span>
-            材料打标失败
-            {task?.items.find((i) => i.assetId === id && i.version === number)
-              ?.error
-              ? `：${task.items.find((i) => i.assetId === id && i.version === number)?.error}`
-              : ""}
-          </span>
-          <Button disabled={!editable} onClick={reparse}>
-            重新识别标签
+            重新解析
           </Button>
         </Note>
       ) : null}
@@ -394,7 +292,7 @@ export default function ContentDetail({ id }: { id: string }) {
               (n) => (
                 <button
                   key={n}
-                  className={`page-rail-item ${page === n ? "active" : ""} ${pageState(v, n).status === "失败" ? "has-error" : ""}`}
+                  className={`page-rail-item ${page === n ? "active" : ""}`}
                   aria-label={`查看第 ${n} 页`}
                   aria-current={page === n ? "page" : undefined}
                   onClick={() => setPage(n)}
@@ -410,10 +308,7 @@ export default function ContentDetail({ id }: { id: string }) {
                         </small>
                       ))}
                   </div>
-                  <span>
-                    第 {n} 页{" "}
-                    {pageState(v, n).status === "失败" ? <i>打标失败</i> : null}
-                  </span>
+                  <span>第 {n} 页</span>
                 </button>
               ),
             )}
@@ -432,63 +327,13 @@ export default function ContentDetail({ id }: { id: string }) {
               <div>
                 <h2>{paginated(v) ? `第 ${page} 页标签` : "内容标签"}</h2>
               </div>
-              <Badge>
-                {pageRetry === page
-                  ? "打标中"
-                  : pageState(v, page).status === "完成"
-                    ? "已完成"
-                    : pageState(v, page).status}
-              </Badge>
             </div>
-            {pageState(v, page).status === "失败" ? (
-              <div className="page-tag-error">
-                <strong>这一页打标失败</strong>
-
-                <Button
-                  disabled={
-                    !can("tags") ||
-                    historical ||
-                    asset.lifecycle !== "正常" ||
-                    pageRetry !== undefined
-                  }
-                  onClick={() => retryPage(page)}
-                >
-                  重试当前页
-                </Button>
-              </div>
-            ) : null}
-            {failedPages(v).length ? (
-              <div className="failed-page-shortcuts">
-                <span>{failedPages(v).length} 页需要处理</span>
-                {failedPages(v).map((n) => (
-                  <button
-                    key={n}
-                    className={page === n ? "active" : ""}
-                    onClick={() => setPage(n)}
-                  >
-                    第 {n} 页
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <TagPanel
               key={`page-tags-${v.number}-${page}`}
               assetId={id}
               versionNumber={v.number}
               page={paginated(v) ? page : undefined}
             />
-            {pageState(v, page).status === "失败" &&
-            can("tags") &&
-            !historical &&
-            asset.lifecycle === "正常" ? (
-              <Button
-                icon={<CheckCircle2 size={16} />}
-                disabled={!v.tags.some((b) => b.page === page)}
-                onClick={() => markPage(page)}
-              >
-                标记为人工处理完成
-              </Button>
-            ) : null}
           </aside>
         ) : null}
       </div>

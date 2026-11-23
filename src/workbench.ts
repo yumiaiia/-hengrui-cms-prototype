@@ -1,5 +1,5 @@
 import { current, expiryStatus, type Asset } from "./model";
-import { failedPages } from "./workflow";
+import { fileParsingFailed } from "./fileProcessing";
 export type AttentionCategory = "approval" | "processing" | "expiry";
 export function contentAttention(assets: Asset[]) {
   return assets
@@ -12,24 +12,17 @@ export function contentAttention(assets: Asset[]) {
           route: string;
           priority: number;
         }[] = [];
-      if (v.process === "失败")
+      if (fileParsingFailed(v))
         issues.push({
           category: "processing",
           label: "文件解析失败",
           route: `content/${a.id}`,
           priority: 0,
         });
-      else if (failedPages(v).length)
+      else if (v.tagStatus === "未匹配")
         issues.push({
           category: "processing",
-          label: `${failedPages(v).length} 页打标失败`,
-          route: `content/${a.id}?page=${failedPages(v)[0]}`,
-          priority: 0,
-        });
-      else if (v.tagStatus === "失败" || v.tagStatus === "未匹配")
-        issues.push({
-          category: "processing",
-          label: v.tagStatus === "失败" ? "材料打标失败" : "标签待核对",
+          label: "标签待核对",
           route: `content/${a.id}`,
           priority: 2,
         });

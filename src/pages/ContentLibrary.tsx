@@ -1,3 +1,4 @@
+import { fileParsingFailed, reparseFile } from "../fileProcessing";
 import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { TagFilter } from "../components/TagFilter";
 import { lazy, useEffect, useMemo, useState } from "react";
@@ -21,7 +22,7 @@ import {
   now,
 } from "../model";
 import { pendingRecommendationsForVersion } from "../taxonomy";
-import { failedPages, matchesTags, pageHits } from "../workflow";
+import { matchesTags, pageHits } from "../workflow";
 import {
   Badge,
   Button,
@@ -67,7 +68,7 @@ export default function ContentLibrary() {
   const cache = `cms-library-v4-${state.userId}`;
   const [filters, setFilters] = useState<Filters>(() => {
     try {
-      return {
+      const saved: Filters = {
         ...defaults,
         ...JSON.parse(sessionStorage.getItem(cache) || "{}"),
         ...(params.has("q") ? { q: params.get("q") || "" } : {}),
@@ -82,6 +83,11 @@ export default function ContentLibrary() {
           : {}),
         ...(params.has("expiry") ? { expiry: params.get("expiry") || "" } : {}),
       };
+      if (saved.tagStatus === "失败") {
+        saved.tagStatus = "";
+        saved.process = "异常";
+      }
+      return saved;
     } catch {
       return defaults;
     }
@@ -129,7 +135,7 @@ export default function ContentLibrary() {
           (!filters.tagStatus || v.tagStatus === filters.tagStatus) &&
           (!filters.process ||
             (filters.process === "异常"
-              ? v.process === "失败" || failedPages(v).length > 0
+              ? fileParsingFailed(v)
               : v.process === filters.process)) &&
           q.includes(filters.q.toLowerCase()) &&
           matchesTags(
@@ -199,6 +205,22 @@ export default function ContentLibrary() {
           value
         ] || value
       : value;
+  function retryFile(assetId: string, version: number) {
+    let error = "";
+    const saved = update(
+      (draft) => {
+        try {
+          reparseFile(draft, assetId, version);
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : "重新解析失败";
+        }
+      },
+      undefined,
+      "edit",
+    );
+    if (error) toast(error);
+    else if (saved) toast("正在重新解析整份文件。");
+  }
   return (
     <div className="library-v3">
       <PageHeader
@@ -302,7 +324,7 @@ export default function ContentLibrary() {
                 onChange={(e) => change("tagStatus", e.target.value)}
               >
                 <option value="">全部</option>
-                {["待打标", "打标中", "已完成", "未匹配", "失败"].map((v) => (
+                {["待打标", "打标中", "已完成", "未匹配"].map((v) => (
                   <option key={v} value={v}>
                     {v === "未匹配" ? "有推荐标签" : v}
                   </option>
@@ -505,31 +527,29 @@ export default function ContentLibrary() {
                             <small className="row-secondary">
                               {a.code} · V{v.number}.0 · {v.source}
                             </small>
-                            {v.process !== "完成" ? (
-                              <Badge>
-                                {v.process === "失败" ? "解析失败" : "解析中"}
-                              </Badge>
-                            ) : failedPages(v).length ? (
-                              <button
-                                className="page-failure-link"
-                                onClick={() =>
-                                  go(
-                                    `content/${a.id}?page=${failedPages(v)[0]}`,
-                                  )
-                                }
-                              >
-                                {failedPages(v).length} 页打标失败
-                              </button>
+                            {fileParsingFailed(v) ? (
+                              <div className="file-processing-actions">
+                                <Badge>解析失败</Badge>
+                                <Button
+                                  variant="ghost"
+                                  disabled={
+                                    !can("edit") ||
+                                    a.lifecycle !== "正常" ||
+                                    ["处理中", "排队中"].includes(v.process)
+                                  }
+                                  onClick={() => retryFile(a.id, v.number)}
+                                  aria-label={a.code + "重新解析整份文件"}
+                                >
+                                  重新解析
+                                </Button>
+                              </div>
+                            ) : v.process !== "完成" ? (
+                              <Badge>解析中</Badge>
                             ) : v.tagStatus !== "已完成" &&
                               v.tagStatus !== "未匹配" ? (
-                              <button
-                                className="page-failure-link"
-                                onClick={() => go(`content/${a.id}`)}
-                              >
-                                {v.tagStatus === "失败"
-                                  ? "材料打标失败"
-                                  : v.tagStatus}
-                              </button>
+                              <span className="row-secondary">
+                                {v.tagStatus}
+                              </span>
                             ) : null}
                           </div>
                         </div>

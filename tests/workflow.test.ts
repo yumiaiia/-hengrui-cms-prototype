@@ -2,12 +2,11 @@ import { describe, it, expect } from "vitest";
 import { current, type Tag } from "../src/model";
 import { seedState } from "../src/seed";
 import {
-  failedPages,
   pageHits,
-  pageState,
   prepareWorkspace,
   publicationProblems,
 } from "../src/workflow";
+import { fileParsingFailed } from "../src/fileProcessing";
 const tags: Tag[] = [
   { id: "d", name: "疾病", parentId: null, enabled: true, external: false },
   { id: "p", name: "页面类型", parentId: null, enabled: true, external: false },
@@ -58,17 +57,17 @@ describe("页级标签检索", () => {
     ]);
   });
 });
-describe("文件解析与页面打标状态", () => {
-  it("某页打标失败不改变整份解析状态，人工处理后消除失败", () => {
+describe("文件解析状态", () => {
+  it("旧页面失败统一阻断整份文件的索引和发布", () => {
     const a = asset();
     const v = current(a);
     v.pageStates = { 2: { status: "失败" } };
-    expect(v.process).toBe("完成");
-    expect(failedPages(v)).toEqual([2]);
-    expect(publicationProblems(a, v)).toContain("请先处理打标失败的页面");
-    v.pageStates[2] = { status: "人工完成" };
-    expect(failedPages(v)).toEqual([]);
-    expect(pageState(v, 2).status).toBe("人工完成");
+    expect(fileParsingFailed(v)).toBe(true);
+    expect(pageHits([a], tags, [], [])).toEqual([]);
+    expect(publicationProblems(a, v)).toContain("请先完成文件解析");
+    expect(
+      publicationProblems(a, v).some((reason) => reason.includes("页面")),
+    ).toBe(false);
   });
   it("OCR 差异已经人工确认时，不阻断发布", () => {
     const a = asset();

@@ -1,4 +1,5 @@
 import { referenceTags } from "./referenceTags";
+import { fileParsingFailed } from "./fileProcessing";
 import { primaryTagId } from "./model";
 import {
   current,
@@ -14,14 +15,6 @@ import {
 
 export const paginated = (v: Version) =>
   ["PDF", "PPT", "Word"].includes(v.kind);
-export const pageState = (v: Version, page: number) =>
-  v.pageStates?.[page] || {
-    status: v.tagStatus === "打标中" ? ("打标中" as const) : ("完成" as const),
-  };
-export const failedPages = (v: Version) =>
-  Object.entries(v.pageStates || {})
-    .filter(([, p]) => p.status === "失败")
-    .map(([p]) => Number(p));
 export function matchesTags(
   bindings: Binding[],
   selected: string[],
@@ -50,6 +43,7 @@ export function pageHits(
     const v = current(asset);
     if (
       v.process !== "完成" ||
+      fileParsingFailed(v) ||
       !matchesTags(
         v.tags.filter((b) => !b.page),
         materialTags,
@@ -83,12 +77,10 @@ export function publicationProblems(asset: Asset, v: Version) {
   return [
     expiryStatus(v) === "已过期" && "内容已过期，请先更新有效期",
     asset.lifecycle !== "正常" && "内容已作废",
-    v.process !== "完成" && "请先完成文件解析",
+    (v.process !== "完成" || fileParsingFailed(v)) && "请先完成文件解析",
     v.approval.mode === "pending" && "请先补充审批信息",
     v.tagStatus === "打标中" && "标签识别尚未完成",
     v.tagStatus === "待打标" && "请先完成标签识别",
-    v.tagStatus === "失败" && "材料标签识别失败",
-    failedPages(v).length > 0 && "请先处理打标失败的页面",
   ].filter(Boolean) as string[];
 }
 export function prepareWorkspace(state: State): State {
@@ -107,11 +99,6 @@ export function prepareWorkspace(state: State): State {
             { status: "完成" },
           ]),
         );
-        if (a.id === "a2")
-          v.pageStates[Math.min(3, v.pages)] = {
-            status: "失败",
-            error: "当前页标签识别未完成，请重试或手动添加标签。",
-          };
       }
     }
   s.publications ||= [];

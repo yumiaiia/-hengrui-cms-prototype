@@ -47,7 +47,7 @@ export default function Workbench() {
     {
       id: "processing" as const,
       name: "解析与标签异常",
-      caption: "解析失败、打标失败及未匹配标签",
+      caption: "文件解析失败及推荐标签待处理",
       icon: FileWarning,
       tone: "rose",
     },

@@ -30,7 +30,7 @@ export const permissionModules: PermissionModule[] = [
       {
         key: "tags",
         label: "维护内容标签",
-        description: "添加、移除材料及页级标签，采纳已入库推荐，重试失败页打标",
+        description: "添加、移除材料及页级标签，采纳已入库推荐",
       },
       { key: "void", label: "作废内容", description: "作废内容并填写原因" },
       {

@@ -1,5 +1,6 @@
 import { prepareSimplification } from "./simplification";
 import { prepareCollection } from "./collection";
+import { prepareFileProcessing } from "./fileProcessing";
 import { advanceTagMatching, retryTagMatching } from "./tagMatching";
 import { prepareRecommendations } from "./recommendations";
 import { prepareAdministration } from "./administration";
@@ -59,10 +60,12 @@ function initial() {
     const raw = localStorage.getItem(key);
     if (raw) {
       const original = JSON.parse(raw);
-      const migrated = prepareCollection(
-        prepareSimplification(
-          prepareRecommendations(
-            prepareAdministration(prepareWorkspace(migrateState(original))),
+      const migrated = prepareFileProcessing(
+        prepareCollection(
+          prepareSimplification(
+            prepareRecommendations(
+              prepareAdministration(prepareWorkspace(migrateState(original))),
+            ),
           ),
         ),
       );
@@ -77,10 +80,12 @@ function initial() {
   } catch (error) {
     loadFailure = error instanceof Error ? error.message : "原型数据无法读取";
   }
-  return prepareCollection(
-    prepareSimplification(
-      prepareRecommendations(
-        prepareAdministration(prepareWorkspace(seedState())),
+  return prepareFileProcessing(
+    prepareCollection(
+      prepareSimplification(
+        prepareRecommendations(
+          prepareAdministration(prepareWorkspace(seedState())),
+        ),
       ),
     ),
   );
