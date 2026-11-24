@@ -33,7 +33,7 @@ describe("账号与角色管理", () => {
     expect(s.roles.find((r) => r.id === ordinary.id)?.permissions).toEqual(
       ordinary.permissions.filter((p) => String(p) !== "rerun"),
     );
-    expect(s.administrationRevision).toBe(3);
+    expect(s.administrationRevision).toBe(4);
   });
   it("只保留超管为内置保护对象，工号标识保留用户及内容关联", () => {
     const before = prepareWorkspace(seedState()),

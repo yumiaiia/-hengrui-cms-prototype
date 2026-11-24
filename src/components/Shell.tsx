@@ -5,6 +5,7 @@ import {
   Radio,
   Tags,
   Settings2,
+  ClipboardList,
   Bell,
   ChevronDown,
   PanelLeftClose,
@@ -27,6 +28,7 @@ const menu = [
   { id: "collection", name: "公众号采集", icon: Radio },
   { id: "tags", name: "标签管理", icon: Tags },
   { id: "admin", name: "系统管理", icon: Settings2 },
+  { id: "audit", name: "操作审计", icon: ClipboardList },
 ];
 export default function Shell({
   children,
@@ -41,7 +43,9 @@ export default function Shell({
   const [profile, setProfile] = useState(false);
   const [help, setHelp] = useState(false);
   const notices = state.notices.filter(
-    (n) => !n.adminOnly || role?.permissions.includes("admin"),
+    (n) =>
+      (!n.adminOnly || role?.permissions.includes("admin")) &&
+      (!n.recipientId || n.recipientId === user?.id || role?.id === "admin"),
   );
   const unread = notices.filter((n) => !n.read).length;
   const active =
@@ -202,7 +206,12 @@ export default function Shell({
             onClick={() =>
               update((s) =>
                 s.notices.forEach((n) => {
-                  if (!n.adminOnly || role?.permissions.includes("admin"))
+                  if (
+                    (!n.adminOnly || role?.permissions.includes("admin")) &&
+                    (!n.recipientId ||
+                      n.recipientId === user?.id ||
+                      role?.id === "admin")
+                  )
                     n.read = true;
                 }),
               )

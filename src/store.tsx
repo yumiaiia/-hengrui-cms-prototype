@@ -1,3 +1,11 @@
+import { moduleForPermission } from "./permissions";
+import {
+  mutationAudit,
+  prepareReview,
+  appendAudit,
+  type AuditInput,
+} from "./audit";
+import { advanceUploads } from "./uploadReview";
 import { prepareSimplification } from "./simplification";
 import { prepareCollection } from "./collection";
 import { prepareFileProcessing } from "./fileProcessing";
@@ -25,17 +33,11 @@ import {
   visibleFor,
   type State,
   type Permission,
-  type Audit,
   type Notice,
   type Task,
 } from "./model";
 const key = "hengrui-cms-state-v1";
-type Log = {
-  action: string;
-  object: string;
-  detail?: string;
-  category?: Audit["category"];
-};
+type Log = AuditInput;
 interface API {
   state: State;
   user: State["users"][number] | undefined;
@@ -54,21 +56,26 @@ interface API {
 }
 const Context = createContext<API | null>(null);
 let loadFailure = "";
+function preparePersisted(value: unknown) {
+  return prepareReview(
+    prepareFileProcessing(
+      prepareCollection(
+        prepareSimplification(
+          prepareRecommendations(
+            prepareAdministration(prepareWorkspace(migrateState(value))),
+          ),
+        ),
+      ),
+    ),
+  );
+}
 function initial() {
   loadFailure = "";
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
       const original = JSON.parse(raw);
-      const migrated = prepareFileProcessing(
-        prepareCollection(
-          prepareSimplification(
-            prepareRecommendations(
-              prepareAdministration(prepareWorkspace(migrateState(original))),
-            ),
-          ),
-        ),
-      );
+      const migrated = preparePersisted(original);
       if (original.schema === 1) {
         if (!localStorage.getItem(key + "-schema1-backup"))
           localStorage.setItem(key + "-schema1-backup", raw);
@@ -80,16 +87,9 @@ function initial() {
   } catch (error) {
     loadFailure = error instanceof Error ? error.message : "原型数据无法读取";
   }
-  return prepareFileProcessing(
-    prepareCollection(
-      prepareSimplification(
-        prepareRecommendations(
-          prepareAdministration(prepareWorkspace(seedState())),
-        ),
-      ),
-    ),
-  );
+  return preparePersisted(seedState());
 }
+
 export function CMSProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>(initial);
   const ref = useRef(state);
@@ -104,25 +104,71 @@ export function CMSProvider({ children }: { children: ReactNode }) {
   const update = useCallback(
     (recipe: (draft: State) => void, log?: Log, permission?: Permission) => {
       if (loadFailure) return false;
-      const before = ref.current;
+      let before = ref.current;
+      try {
+        const saved = localStorage.getItem(key);
+        if (saved && saved !== JSON.stringify(before)) {
+          before = preparePersisted(JSON.parse(saved));
+          ref.current = before;
+          setState(before);
+        }
+      } catch {
+        toast("保存的数据无法读取，本次操作未提交，请重新加载。");
+        return false;
+      }
       const person = before.users.find((u) => u.id === before.userId);
       const role = before.roles.find((r) => r.id === person?.roleId);
-      if (permission && !canRole(role, permission)) {
+      if (
+        permission &&
+        (!person || person.enabled === false || !canRole(role, permission))
+      ) {
         toast("当前角色没有执行此操作的权限。");
         return false;
       }
+      const moduleKey = permission
+        ? moduleForPermission(permission)?.key
+        : undefined;
+      const modules: Record<string, import("./model").AuditModule> = {
+        library: "内容库",
+        publishing: "发布管理",
+        tags: "标签管理",
+        admin: "系统管理",
+        collection: "公众号采集",
+      };
+      const event: AuditInput | undefined = log
+        ? {
+            ...log,
+            module: log.module || (moduleKey ? modules[moduleKey] : undefined),
+          }
+        : undefined;
       const draft = structuredClone(before);
-      recipe(draft);
-      if (log)
-        draft.audits.unshift({
-          id: uid("log"),
-          at: now(),
-          user: person?.name || "演示登录",
-          action: log.action,
-          object: log.object,
-          detail: log.detail || "",
-          category: log.category || "内容",
-        });
+      try {
+        recipe(draft);
+      } catch (error) {
+        if (event) {
+          const failed = structuredClone(before);
+          appendAudit(failed, {
+            ...event,
+            result: "失败",
+            detail: error instanceof Error ? error.message : "操作失败",
+          });
+          try {
+            localStorage.setItem(key, JSON.stringify(failed));
+            ref.current = failed;
+            setState(failed);
+          } catch {
+            /* The user receives the original failure; no success is emitted. */
+          }
+        }
+        throw error;
+      }
+      mutationAudit(
+        before,
+        draft,
+        event
+          ? { ...event, ...log, module: log?.module || event.module }
+          : undefined,
+      );
       try {
         localStorage.setItem(key, JSON.stringify(draft));
       } catch {
@@ -135,6 +181,20 @@ export function CMSProvider({ children }: { children: ReactNode }) {
     },
     [toast],
   );
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key !== key || !event.newValue) return;
+      try {
+        const next = preparePersisted(JSON.parse(event.newValue));
+        ref.current = next;
+        setState(next);
+      } catch {
+        toast("其他页面保存的数据无法读取，请重新加载后再操作。");
+      }
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, [toast]);
   const notify = useCallback(
     (notice: Omit<Notice, "id" | "read" | "at">) => {
       update((s) => {
@@ -166,7 +226,9 @@ export function CMSProvider({ children }: { children: ReactNode }) {
     },
     [update],
   );
-  const user = state.users.find((u) => u.id === state.userId);
+  const user = state.users.find(
+    (u) => u.id === state.userId && u.enabled !== false,
+  );
   const role = state.roles.find((r) => r.id === user?.roleId);
   const assets = visibleFor(state, user, role);
   const can = (p: Permission) => canRole(role, p);
@@ -175,7 +237,11 @@ export function CMSProvider({ children }: { children: ReactNode }) {
     if (!t) return;
     if (t.type === "采集") return;
     if (t.type === "标签匹配") {
-      update((s) => retryTagMatching(s, id));
+      update(
+        (s) => retryTagMatching(s, id),
+        { action: "重试标签匹配", object: t.name, module: "标签管理" },
+        "taxonomy",
+      );
       return;
     }
     if (!can(t.type === "导出" ? "export" : "edit"))
@@ -188,6 +254,7 @@ export function CMSProvider({ children }: { children: ReactNode }) {
         task.status = "处理中";
         task.finishAt = Date.now() + 1800;
         task.attempts++;
+        task.actorId = s.userId || undefined;
         for (const item of task.items)
           if (item.status === "失败" || item.status === "部分失败") {
             item.status = "处理中";
@@ -212,6 +279,23 @@ export function CMSProvider({ children }: { children: ReactNode }) {
   };
   useEffect(() => {
     const timer = setInterval(() => {
+      const uploadDue = (ref.current.uploadBatches || []).filter((b) =>
+        b.items.some(
+          (i) =>
+            i.finishAt !== undefined &&
+            i.finishAt <= Date.now() &&
+            !i.archived &&
+            !i.cancelled,
+        ),
+      );
+      for (const batch of uploadDue)
+        update((s) => advanceUploads(s, Date.now(), batch.id), {
+          action: "解析打标完成",
+          object: batch.id,
+          batchId: batch.id,
+          source: "系统",
+          actorId: batch.ownerId,
+        });
       const due = ref.current.tasks.filter(
         (t) =>
           t.type !== "采集" &&
@@ -220,130 +304,141 @@ export function CMSProvider({ children }: { children: ReactNode }) {
           t.status === "处理中",
       );
       if (!due.length) return;
-      update((s) => {
-        for (const previous of due) {
-          const task = s.tasks.find((t) => t.id === previous.id)!;
-          if (task.type === "标签匹配") {
-            advanceTagMatching(s, task);
-            continue;
-          }
-          task.finishAt = undefined;
-          task.status = task.items.some(
-            (i) => i.status === "失败" || i.status === "部分失败",
-          )
-            ? "部分失败"
-            : "完成";
-          for (const item of task.items) {
-            if (item.status !== "处理中" && item.status !== "排队中") continue;
-            item.status = "完成";
-            item.error = undefined;
-            const asset = s.assets.find((a) => a.id === item.assetId);
-            const v = asset?.versions.find((v) => v.number === item.version);
-            if (v && task.type === "解析与打标") {
-              if (task.type === "解析与打标") v.process = "完成";
-              v.tagStatus = "已完成";
-              if (!v.pageStates && ["PDF", "PPT", "Word"].includes(v.kind))
-                v.pageStates = Object.fromEntries(
-                  Array.from({ length: v.pages }, (_, i) => [
-                    i + 1,
-                    { status: "完成" },
-                  ]),
-                );
-              if (v.pageStates)
-                for (const page of Object.values(v.pageStates))
-                  if (page.status === "打标中" || page.status === "待打标") {
-                    page.status = "完成";
-                    page.error = undefined;
-                  }
-              v.unmatched = undefined;
-              if (!v.tags.some((t) => t.origin === "AI" && !t.page))
-                for (const id of ["t3", "t5"]) {
-                  const tag = s.tags.find((t) => t.id === id);
-                  if (
-                    tag &&
-                    availableTag(s.tags, tag) &&
-                    !v.tags.some((b) => b.tagId === id && !b.page)
-                  )
-                    v.tags.push({ tagId: id, origin: "AI" });
-                }
-              if (["PDF", "PPT", "Word"].includes(v.kind)) {
-                const choices = s.tags.filter(
-                  (t) =>
-                    t.parentId === primaryTagId("页面类型") &&
-                    availableTag(s.tags, t),
-                );
-                for (let page = 1; page <= v.pages; page++) {
-                  const tag = choices[(page - 1) % Math.max(1, choices.length)];
-                  if (tag && !v.tags.some((b) => b.page === page))
-                    v.tags.push({ tagId: tag.id, origin: "AI", page });
-                }
-              }
-              const parent = s.tags.find(
-                (t) =>
-                  t.parentId === null &&
-                  t.id === primaryTagId("Key Message") &&
-                  t.enabled,
-              );
-              if (parent) {
-                const name = "研究要点提炼";
-                const known = s.tags.find(
-                  (t) =>
-                    t.parentId === parent.id &&
-                    t.name === name &&
-                    availableTag(s.tags, t),
-                );
-                if (known) {
-                  if (!v.tags.some((b) => b.tagId === known.id && !b.page))
-                    v.tags.push({ tagId: known.id, origin: "AI" });
-                } else {
-                  let suggestion = s.suggestions.find(
-                    (r) => r.parentId === parent.id && r.name === name,
+      for (const previous of due)
+        update(
+          (s) => {
+            const task = s.tasks.find((t) => t.id === previous.id)!;
+            if (task.type === "标签匹配") {
+              advanceTagMatching(s, task);
+              return;
+            }
+            task.finishAt = undefined;
+            task.status = task.items.some(
+              (i) => i.status === "失败" || i.status === "部分失败",
+            )
+              ? "部分失败"
+              : "完成";
+            for (const item of task.items) {
+              if (item.status !== "处理中" && item.status !== "排队中")
+                continue;
+              item.status = "完成";
+              item.error = undefined;
+              const asset = s.assets.find((a) => a.id === item.assetId);
+              const v = asset?.versions.find((v) => v.number === item.version);
+              if (v && task.type === "解析与打标") {
+                if (task.type === "解析与打标") v.process = "完成";
+                v.tagStatus = "已完成";
+                if (!v.pageStates && ["PDF", "PPT", "Word"].includes(v.kind))
+                  v.pageStates = Object.fromEntries(
+                    Array.from({ length: v.pages }, (_, i) => [
+                      i + 1,
+                      { status: "完成" },
+                    ]),
                   );
-                  if (!suggestion) {
-                    suggestion = {
-                      id: uid("suggestion"),
-                      name,
-                      parentId: parent.id,
-                      mentions: 0,
-                      assetIds: [],
-                      contexts: [],
-                      accepted: [],
-                      status: "待处理",
-                    };
-                    s.suggestions.unshift(suggestion);
-                  }
-                  if (
-                    !suggestion.contexts?.some(
-                      (c) => c.assetId === asset!.id && c.version === v.number,
+                if (v.pageStates)
+                  for (const page of Object.values(v.pageStates))
+                    if (page.status === "打标中" || page.status === "待打标") {
+                      page.status = "完成";
+                      page.error = undefined;
+                    }
+                v.unmatched = undefined;
+                if (!v.tags.some((t) => t.origin === "AI" && !t.page))
+                  for (const id of ["t3", "t5"]) {
+                    const tag = s.tags.find((t) => t.id === id);
+                    if (
+                      tag &&
+                      availableTag(s.tags, tag) &&
+                      !v.tags.some((b) => b.tagId === id && !b.page)
                     )
-                  ) {
-                    suggestion.contexts ||= [];
-                    suggestion.contexts.push({
-                      assetId: asset!.id,
-                      version: v.number,
-                    });
-                    suggestion.mentions++;
+                      v.tags.push({ tagId: id, origin: "AI" });
                   }
-                  if (!suggestion.assetIds.includes(asset!.id))
-                    suggestion.assetIds.push(asset!.id);
-                  v.tagStatus = "未匹配";
-                  v.unmatched = "有新的标签建议待处理（原型模拟）。";
+                if (["PDF", "PPT", "Word"].includes(v.kind)) {
+                  const choices = s.tags.filter(
+                    (t) =>
+                      t.parentId === primaryTagId("页面类型") &&
+                      availableTag(s.tags, t),
+                  );
+                  for (let page = 1; page <= v.pages; page++) {
+                    const tag =
+                      choices[(page - 1) % Math.max(1, choices.length)];
+                    if (tag && !v.tags.some((b) => b.page === page))
+                      v.tags.push({ tagId: tag.id, origin: "AI", page });
+                  }
+                }
+                const parent = s.tags.find(
+                  (t) =>
+                    t.parentId === null &&
+                    t.id === primaryTagId("Key Message") &&
+                    t.enabled,
+                );
+                if (parent) {
+                  const name = "研究要点提炼";
+                  const known = s.tags.find(
+                    (t) =>
+                      t.parentId === parent.id &&
+                      t.name === name &&
+                      availableTag(s.tags, t),
+                  );
+                  if (known) {
+                    if (!v.tags.some((b) => b.tagId === known.id && !b.page))
+                      v.tags.push({ tagId: known.id, origin: "AI" });
+                  } else {
+                    let suggestion = s.suggestions.find(
+                      (r) => r.parentId === parent.id && r.name === name,
+                    );
+                    if (!suggestion) {
+                      suggestion = {
+                        id: uid("suggestion"),
+                        name,
+                        parentId: parent.id,
+                        mentions: 0,
+                        assetIds: [],
+                        contexts: [],
+                        accepted: [],
+                        status: "待处理",
+                      };
+                      s.suggestions.unshift(suggestion);
+                    }
+                    if (
+                      !suggestion.contexts?.some(
+                        (c) =>
+                          c.assetId === asset!.id && c.version === v.number,
+                      )
+                    ) {
+                      suggestion.contexts ||= [];
+                      suggestion.contexts.push({
+                        assetId: asset!.id,
+                        version: v.number,
+                      });
+                      suggestion.mentions++;
+                    }
+                    if (!suggestion.assetIds.includes(asset!.id))
+                      suggestion.assetIds.push(asset!.id);
+                    v.tagStatus = "未匹配";
+                    v.unmatched = "有新的标签建议待处理（原型模拟）。";
+                  }
                 }
               }
             }
-          }
-          s.notices.unshift({
-            id: uid("notice"),
-            title: `${task.name}已完成`,
-            detail: "查看处理结果。",
-            route: task.items[0]?.assetId
-              ? `content/${task.items[0].assetId}`
-              : "library",
-            read: false,
-            at: now(),
-          });
-        }
-      });
+            s.notices.unshift({
+              id: uid("notice"),
+              title: `${task.name}已完成`,
+              detail: "查看处理结果。",
+              route: task.items[0]?.assetId
+                ? `content/${task.items[0].assetId}`
+                : "library",
+              read: false,
+              at: now(),
+            });
+          },
+          {
+            action:
+              previous.type === "标签匹配" ? "标签匹配结果" : "后台任务完成",
+            object: previous.name,
+            source: "系统",
+            actorId: previous.actorId,
+          },
+        );
     }, 500);
     return () => clearInterval(timer);
   }, [update]);

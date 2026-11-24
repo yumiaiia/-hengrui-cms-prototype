@@ -134,16 +134,6 @@ export function ExportHistory({ onClose }: { onClose: () => void }) {
           "此文件包包含审批截图，当前角色没有截图下载权限。请在内容库重新生成不含截图的导出。",
         );
       download(blob, taskNow.artifactName || "内容导出.zip");
-      newest.update(
-        () => {},
-        {
-          action: "下载已完成导出",
-          object: businessName(taskNow, newest.assets),
-          detail: `${taskNow.items.length} 份可见内容；下载生成时保存的本地文件，不改写审批快照。`,
-          category: "内容",
-        },
-        "export",
-      );
       newest.toast("已下载保存的导出文件。");
     } catch (error) {
       live.current.toast(

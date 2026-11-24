@@ -1,3 +1,4 @@
+import { visibleBatches, activeItem } from "../uploadReview";
 import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { useState } from "react";
 import {
@@ -36,6 +37,9 @@ export default function Workbench() {
       : attention.filter((i) =>
           i.issues.some((issue) => issue.category === category),
         );
+  const pendingUploads = visibleBatches(state).flatMap((b) =>
+    b.items.filter(activeItem),
+  );
   const cards = [
     {
       id: "approval" as const,
@@ -79,6 +83,33 @@ export default function Workbench() {
           ) : undefined
         }
       />
+      {contentAllowed && (can("upload") || (can("taxonomy") && can("tags"))) ? (
+        <section className="panel workbench-pending">
+          <div>
+            <strong>
+              待确认结果{" "}
+              {pendingUploads.filter((i) => i.v.process === "完成").length} 份
+            </strong>
+            <p>
+              另有{" "}
+              {pendingUploads.filter((i) => i.v.process === "处理中").length}{" "}
+              份解析中 ·{" "}
+              {
+                pendingUploads.filter(
+                  (i) =>
+                    i.v.process === "失败" ||
+                    i.v.tagStatus === "失败" ||
+                    i.archiveError,
+                ).length
+              }{" "}
+              份异常需处理
+            </p>
+          </div>
+          <Button onClick={() => go("library?tab=pending")}>
+            处理待确认结果
+          </Button>
+        </section>
+      ) : null}
       <div
         className={`queue-grid workbench-attention-grid ${!publishAllowed ? "without-publications" : ""}`}
       >

@@ -3,7 +3,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { useCMS } from "../store";
 import { recommendationSources, primaryTags } from "../taxonomy";
 import { Badge, Button, Dialog, Empty, Pagination, SearchBox } from "./ui";
-import { ignoreRecommendation } from "../recommendations";
+import { setRecommendationCancelled } from "../recommendations";
 import { SuggestionSources } from "./SuggestionSources";
 
 export function RecommendedTags() {
@@ -17,14 +17,17 @@ export function RecommendedTags() {
   const suggestions = state.suggestions.map((s) => {
     const sources = recommendationSources(s, assets, state.tags);
     const accepted = sources.filter((c) => c.accepted).length;
+    const cancelled = sources.filter((c) => c.cancelled && !c.accepted).length;
     const displayStatus =
-      s.status === "已忽略"
-        ? "已忽略"
-        : accepted && accepted === sources.length
-          ? "已采纳"
-          : accepted
-            ? "部分采纳"
-            : "待处理";
+      sources.length && accepted === sources.length
+        ? "已采纳"
+        : sources.length && cancelled === sources.length
+          ? "已取消"
+          : sources.length && accepted + cancelled === sources.length
+            ? "已处理"
+            : accepted || cancelled
+              ? "部分处理"
+              : "待处理";
     return { suggestion: s, sources, accepted, displayStatus };
   });
   const rows = suggestions.filter(
@@ -46,13 +49,18 @@ export function RecommendedTags() {
     if (!detail) return;
     try {
       const ok = update(
-        (s) => ignoreRecommendation(s, detailId),
-        undefined,
+        (s) => setRecommendationCancelled(s, detailId, true),
+        {
+          action: "取消推荐标签",
+          object: detail.suggestion.name,
+          module: "标签管理",
+          category: "标签",
+        },
         "taxonomy",
       );
       if (ok) {
         setIgnoring(false);
-        toast("已忽略这条推荐，已采纳的标签保留。");
+        toast("已取消待处理来源，已采纳标签保留。");
       }
     } catch (failure) {
       toast(failure instanceof Error ? failure.message : "操作失败，请重试。");
@@ -100,7 +108,7 @@ export function RecommendedTags() {
           }}
         >
           <option value="">全部状态</option>
-          {["待处理", "部分采纳", "已采纳", "已忽略"].map((s) => (
+          {["待处理", "部分处理", "已采纳", "已取消", "已处理"].map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>
@@ -181,8 +189,10 @@ export function RecommendedTags() {
           footer={
             <>
               {can("taxonomy") &&
-              !["已采纳", "已忽略"].includes(detail.displayStatus) ? (
-                <Button onClick={() => setIgnoring(true)}>忽略此推荐</Button>
+              ["待处理", "部分处理"].includes(detail.displayStatus) ? (
+                <Button onClick={() => setIgnoring(true)}>
+                  取消待处理推荐
+                </Button>
               ) : null}
               <Button
                 onClick={() => {
@@ -214,20 +224,20 @@ export function RecommendedTags() {
       ) : null}
       {ignoring && detail ? (
         <Dialog
-          title="忽略推荐标签"
+          title="取消推荐标签"
           onClose={() => setIgnoring(false)}
           footer={
             <>
               <Button onClick={() => setIgnoring(false)}>取消</Button>
               <Button variant="primary" onClick={ignore}>
-                确认忽略
+                确认取消
               </Button>
             </>
           }
         >
           <p>
-            忽略“{detail.suggestion.name}
-            ”后，各来源内容将不再提示这条推荐。已经采纳的标签会保留，仍可在“已忽略”中查看来源。
+            取消“{detail.suggestion.name}
+            ”的待处理来源后，不再提示这些推荐。已采纳的标签会保留，可在来源中恢复已取消项。
           </p>
         </Dialog>
       ) : null}

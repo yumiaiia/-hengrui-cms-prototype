@@ -1,3 +1,4 @@
+import UserTransfer from "../components/UserTransfer";
 import {
   permissionModules,
   toggleRoleModule,
@@ -115,7 +116,11 @@ export default function Administration() {
     try {
       const ok = update(
         (s) => saveManagedUser(s, userDraft),
-        undefined,
+        {
+          action: userDraft.id ? "修改用户" : "创建用户",
+          object: `${userDraft.name} / ${userDraft.employeeId}`,
+          category: "系统",
+        },
         "admin",
       );
       if (ok) {
@@ -134,7 +139,11 @@ export default function Administration() {
     try {
       const ok = update(
         (s) => saveManagedRole(s, roleDraft, creating),
-        undefined,
+        {
+          action: creating ? "创建角色" : "修改角色权限",
+          object: roleDraft.name,
+          category: "系统",
+        },
         "admin",
       );
       if (ok) {
@@ -157,7 +166,16 @@ export default function Administration() {
           if (confirm.type === "role") deleteManagedRole(s, confirm.id);
           else setUserEnabled(s, confirm.id, !!confirm.enabled);
         },
-        undefined,
+        {
+          action:
+            confirm.type === "role"
+              ? "删除角色"
+              : confirm.enabled
+                ? "启用账号"
+                : "停用账号",
+          object: confirm.name,
+          category: "系统",
+        },
         "admin",
       );
       if (ok) {
@@ -193,13 +211,16 @@ export default function Administration() {
               onChange={setUserSearch}
               placeholder="搜索姓名、工号或角色"
             />
-            <Button
-              variant="primary"
-              icon={<UserPlus size={16} />}
-              onClick={() => editUser()}
-            >
-              创建账号
-            </Button>
+            <div className="actions">
+              <UserTransfer users={filteredUsers} />
+              <Button
+                variant="primary"
+                icon={<UserPlus size={16} />}
+                onClick={() => editUser()}
+              >
+                创建账号
+              </Button>
+            </div>
           </div>
 
           {filteredUsers.length ? (

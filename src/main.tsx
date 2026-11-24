@@ -3,6 +3,7 @@ import { CMSProvider } from "./store";
 import App from "./App";
 import "./styles.css";
 import "./redesign.css";
+import "./review.css";
 createRoot(document.getElementById("root")!).render(
   <CMSProvider>
     <App />

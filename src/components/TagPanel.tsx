@@ -1,3 +1,4 @@
+import { bindingName } from "../tagResults";
 import { useState } from "react";
 import { Check, Plus, Sparkles, X } from "lucide-react";
 import { useCMS } from "../store";
@@ -5,6 +6,7 @@ import { current, now, type Version } from "../model";
 import {
   availableTag,
   bindTag,
+  removeTag,
   pendingSuggestions,
   primaryTags,
   suggestionContexts,
@@ -63,11 +65,16 @@ export function TagPanel({
             throw new Error("当前内容已变化，请重新打开。");
           const v = current(a);
           if (v.tags.some((b) => b.tagId === id && b.page === page))
-            v.tags = v.tags.filter((b) => !(b.tagId === id && b.page === page));
+            removeTag(s, assetId, number!, id, page);
           else bindTag(s, assetId, number!, id, page);
           a.updatedAt = now();
         },
-        undefined,
+        {
+          action: "修改内容标签",
+          object: asset?.code || assetId,
+          category: "标签",
+          detail: page ? `第 ${page} 页` : "整份材料",
+        },
         "tags",
       );
       if (ok) toast("标签已更新。");
@@ -88,7 +95,8 @@ export function TagPanel({
         roots.map((root) => {
           const list = bindings.filter(
             (b) =>
-              state.tags.find((t) => t.id === b.tagId)?.parentId === root.id,
+              (b.parentId ||
+                state.tags.find((t) => t.id === b.tagId)?.parentId) === root.id,
           );
           return list.length ? (
             <section className="tag-family" key={root.id}>
@@ -100,10 +108,15 @@ export function TagPanel({
                     key={b.tagId}
                     title={b.origin === "人工" ? "人工校正" : "AI 识别"}
                   >
-                    {state.tags.find((t) => t.id === b.tagId)?.name}
+                    {bindingName(b, state.tags)}
+                    {state.tags.some(
+                      (t) => t.id === b.tagId && !availableTag(state.tags, t),
+                    ) ? (
+                      <small>（已停用）</small>
+                    ) : null}
                     {editable ? (
                       <button
-                        aria-label={`移除标签${state.tags.find((t) => t.id === b.tagId)?.name}`}
+                        aria-label={`移除标签${bindingName(b, state.tags)}`}
                         onClick={() => toggle(b.tagId)}
                       >
                         <X size={12} />

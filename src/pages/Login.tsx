@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import { Button, Field } from "../components/ui";
-import { go, now, uid, type User } from "../model";
+import { go, type User } from "../model";
 import { useCMS } from "../store";
 import { findUserByEmployeeId } from "../userIdentity";
 import "./admin.css";
@@ -60,22 +60,12 @@ export default function Login() {
       findUserByEmployeeId(state.users, user.employeeId)?.id !== user.id
     )
       return setError("请选择已启用且已填写工号的账号。");
-    const loginEmployeeId = user.employeeId;
     const assignedRole = state.roles.find((role) => role.id === user.roleId);
     if (!assignedRole)
       return setError("该账号未关联有效角色，请让演示管理员修复角色配置。");
     setBusy(true);
     const saved = update((draft) => {
       draft.userId = user.id;
-      draft.audits.unshift({
-        id: uid("log"),
-        at: now(),
-        user: user.name,
-        action: method === "sso" ? "演示企微 SSO 登录" : "平台账号演示登录",
-        object: loginEmployeeId,
-        detail: `在当前浏览器切换为「${assignedRole.name}」演示身份。未连接认证服务；演示密码不校验、不保存；不修改账号原有权限。`,
-        category: "系统",
-      });
     });
     setBusy(false);
     if (saved) {

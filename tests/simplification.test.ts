@@ -1,3 +1,4 @@
+import { cancelStaged } from "../src/uploadReview";
 import { describe, expect, it } from "vitest";
 import { seedState } from "../src/seed";
 import { prepareWorkspace } from "../src/workflow";
@@ -117,7 +118,7 @@ describe("精简数据迁移", () => {
     ]);
   });
 });
-describe("增量标签匹配", () => {
+describe("标签匹配暂存结果", () => {
   it("匹配异常可重试，恢复后保留已完成项和新增计数", () => {
     const s = setup(),
       a = matchableAssets(s)[0],
@@ -139,10 +140,15 @@ describe("增量标签匹配", () => {
     v.content = ["重试词", ...body];
     retryTagMatching(s, id);
     expect(finish(s, id).status).toBe("完成");
-    expect(v.tags.some((b) => b.tagId === "retry-keyword")).toBe(true);
+    expect(v.tags.some((b) => b.tagId === "retry-keyword")).toBe(false);
+    expect(
+      s
+        .uploadBatches![0].items.find((i) => i.targetId === a.id)!
+        .v.tags.some((b) => b.tagId === "retry-keyword"),
+    ).toBe(true);
     expect(failed.items.filter((i) => i.assetId === a.id)).toHaveLength(1);
   });
-  it("材料及页级匹配只追加缺失绑定，不改人工、历史、审批和发布快照", () => {
+  it("材料及页级结果先暂存，保留人工、历史、审批和发布快照", () => {
     const s = setup(),
       a = matchableAssets(s)[0],
       v = current(a);
@@ -163,22 +169,30 @@ describe("增量标签匹配", () => {
     const done = finish(s, startTagMatching(s));
     expect(done.status).toBe("完成");
     expect(v.tags).toContainEqual({ tagId: "manual", origin: "人工" });
-    expect(v.tags).toContainEqual({
-      tagId: "match-test",
-      origin: "AI",
-      page: undefined,
-    });
-    expect(v.tags).toContainEqual({
-      tagId: "match-test",
-      origin: "AI",
-      page: 1,
-    });
+    const staged = s.uploadBatches![0].items.find((i) => i.targetId === a.id)!;
+    expect(v.tags.some((b) => b.tagId === "match-test")).toBe(false);
+    expect(staged.v.tags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tagId: "match-test",
+          origin: "AI",
+          page: undefined,
+        }),
+        expect.objectContaining({ tagId: "match-test", origin: "AI", page: 1 }),
+      ]),
+    );
     expect(a.versions.find((v) => v.number === 99)).toEqual(old);
     expect(v.approval).toEqual(approval);
     expect(s.publications).toEqual(pubs);
-    expect(finish(s, startTagMatching(s)).result?.added).toBe(0);
+    expect(() => startTagMatching(s)).toThrow("等待确认");
+    cancelStaged(
+      s,
+      s.uploadBatches![0].id,
+      s.uploadBatches![0].items.map((i) => i.id),
+    );
+    expect(finish(s, startTagMatching(s)).status).toBe("完成");
   });
-  it("停用标签、失败页和非当前版本不参与匹配，变更文件跳过只计一次", () => {
+  it("失败页不进入匹配范围，处理中已作废文件保留原结果", () => {
     const s = setup(),
       a = matchableAssets(s)[0],
       v = current(a),
@@ -209,8 +223,11 @@ describe("增量标签匹配", () => {
     expect(v.tags.some((b) => b.tagId === "page-test" && b.page === 1)).toBe(
       false,
     );
-    expect(done.items.find((i) => i.assetId === other.id)?.skipped).toBe(true);
-    expect(done.result?.skipped).toBe(s.assets.length - done.items.length + 1);
+    expect(done.items.some((i) => i.assetId === a.id)).toBe(false);
+    expect(done.items.find((i) => i.assetId === other.id)?.status).toBe("失败");
+    expect(
+      s.uploadBatches![0].items.find((i) => i.targetId === other.id)?.error,
+    ).toContain("变化");
   });
   it("权限和并发受控，失败重试保留成功结果", () => {
     const s = setup(),

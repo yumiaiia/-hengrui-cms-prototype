@@ -1,3 +1,5 @@
+import { setRecommendationCancelled } from "../recommendations";
+import { useTagCheck } from "./TagSimilarity";
 import { useState } from "react";
 import { Eye, FileText, Sparkles } from "lucide-react";
 import { useCMS } from "../store";
@@ -29,6 +31,7 @@ export function SuggestionSources({
   compact?: boolean;
 }) {
   const { state, assets, can, update, toast } = useCMS();
+  const { checkTag, similarityDialog } = useTagCheck();
   const [preview, setPreview] = useState<Source>();
   const [previewPage, setPreviewPage] = useState(1);
   const sources = recommendationSources(suggestion, assets, state.tags).filter(
@@ -44,25 +47,42 @@ export function SuggestionSources({
   const parent = state.tags.find((t) => t.id === suggestion.parentId);
   function accept(source: Source) {
     try {
-      const ok = update(
-        (s) => {
-          acceptSuggestedTag(
-            s,
-            suggestion.id,
-            source.assetId,
-            source.versionNumber,
-            suggestion.parentId,
-            source.page,
+      const commit = (choice: { receipt?: string }) => {
+        const ok = update(
+          (s) => {
+            acceptSuggestedTag(
+              s,
+              suggestion.id,
+              source.assetId,
+              source.versionNumber,
+              suggestion.parentId,
+              source.page,
+              choice,
+            );
+          },
+          {
+            action: "采纳推荐标签",
+            module: scope ? "内容库" : "标签管理",
+            object: suggestion.name,
+            category: "标签",
+            detail: choice.receipt
+              ? `已检查相似标签，仍然创建 ${suggestion.name}`
+              : "",
+          },
+          existing ? "tags" : "taxonomy",
+        );
+        if (ok)
+          toast(
+            source.page
+              ? `已采纳并添加到第 ${source.page} 页。`
+              : "已采纳并添加为材料标签。",
           );
-        },
-        undefined,
-        existing ? "tags" : "taxonomy",
-      );
-      if (ok)
-        toast(
-          source.page
-            ? `已采纳并添加到第 ${source.page} 页。`
-            : "已采纳并添加为材料标签。",
+      };
+      if (existing) commit({});
+      else
+        checkTag(
+          { name: suggestion.name, parentId: suggestion.parentId },
+          commit,
         );
     } catch (failure) {
       toast(failure instanceof Error ? failure.message : "采纳失败，请重试。");
@@ -76,7 +96,7 @@ export function SuggestionSources({
           !source.issue &&
           source.asset?.current === source.version?.number &&
           source.asset?.lifecycle === "正常" &&
-          suggestion.status !== "已忽略" &&
+          !source.cancelled &&
           can("tags") &&
           !!parent?.enabled &&
           (!existing ? can("taxonomy") : availableTag(state.tags, existing));
@@ -120,8 +140,8 @@ export function SuggestionSources({
               </Button>
               {source.accepted ? (
                 <Badge tone="green">已采纳</Badge>
-              ) : suggestion.status === "已忽略" ? (
-                <Badge tone="gray">已忽略</Badge>
+              ) : source.cancelled ? (
+                <Badge tone="gray">已取消</Badge>
               ) : (
                 <Button
                   variant="ghost"
@@ -141,6 +161,52 @@ export function SuggestionSources({
                   采纳并添加
                 </Button>
               )}
+              {!readOnly &&
+              !source.accepted &&
+              !source.issue &&
+              !history &&
+              can("tags") &&
+              source.asset?.lifecycle === "正常" ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    try {
+                      if (
+                        update(
+                          (s) =>
+                            setRecommendationCancelled(
+                              s,
+                              suggestion.id,
+                              !source.cancelled,
+                              {
+                                assetId: source.assetId,
+                                version: source.versionNumber,
+                                page: source.page,
+                              },
+                            ),
+                          {
+                            action: source.cancelled
+                              ? "恢复推荐标签"
+                              : "取消推荐标签",
+                            object: suggestion.name,
+                            module: scope ? "内容库" : "标签管理",
+                          },
+                          "tags",
+                        )
+                      )
+                        toast(
+                          source.cancelled
+                            ? "推荐已恢复，可重新采纳。"
+                            : "已取消本处推荐。",
+                        );
+                    } catch (e) {
+                      toast(e instanceof Error ? e.message : "操作未保存");
+                    }
+                  }}
+                >
+                  {source.cancelled ? "恢复推荐" : "取消推荐"}
+                </Button>
+              ) : null}
             </div>
           </div>
         );
@@ -199,6 +265,7 @@ export function SuggestionSources({
           </div>
         </Dialog>
       ) : null}
+      {similarityDialog}
     </div>
   );
 }

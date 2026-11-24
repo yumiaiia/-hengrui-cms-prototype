@@ -1,3 +1,6 @@
+import { availableTag } from "../taxonomy";
+import { bindingName } from "../tagResults";
+import { ContentMedia } from "../components/ContentMedia";
 import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { useEffect, useState } from "react";
 import {
@@ -88,25 +91,24 @@ export default function ContentDetail({ id }: { id: string }) {
   const editable = can("edit") && !historical && asset.lifecycle === "正常";
   const shot = v.approval.snapshot?.evidence[0];
   function reparse() {
-    let error = "";
-    const saved = update(
-      (draft) => {
-        try {
-          reparseFile(draft, id, number);
-        } catch (cause) {
-          error = cause instanceof Error ? cause.message : "重新解析失败";
-        }
-      },
-      undefined,
-      "edit",
-    );
-    if (error) toast(error);
-    else if (saved) toast("正在重新解析整份文件。");
+    try {
+      if (
+        update(
+          (draft) => reparseFile(draft, id, number),
+          { action: "重试文件解析", object: asset!.code, module: "内容库" },
+          "edit",
+        )
+      )
+        toast("正在重新解析整份文件。");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "重新解析失败");
+    }
   }
   async function original() {
     if (!can("export")) return toast("没有下载权限");
     try {
-      download(await loadBlob(v!.fileKey, v!.fileUrl), v!.fileName);
+      const blob = await loadBlob(v!.fileKey, v!.fileUrl);
+      download(blob, v!.fileName);
     } catch (e) {
       toast(e instanceof Error ? e.message : "原文件暂不可用");
     }
@@ -121,7 +123,7 @@ export default function ContentDetail({ id }: { id: string }) {
   }
   function saveMeta() {
     if (!title.trim()) return toast("请输入内容标题");
-    update(
+    const saved = update(
       (s) => {
         const a = s.assets.find((a) => a.id === id)!;
         const target = a.versions.find((v) => v.number === number)!;
@@ -139,8 +141,10 @@ export default function ContentDetail({ id }: { id: string }) {
       },
       "edit",
     );
-    setModal("");
-    toast("内容信息已保存");
+    if (saved) {
+      setModal("");
+      toast("内容信息已保存");
+    }
   }
   return (
     <div className="content-detail-v3">
@@ -219,6 +223,16 @@ export default function ContentDetail({ id }: { id: string }) {
           ) : null}
         </div>
         <div className="actions">
+          {can("audit") ? (
+            <Button
+              variant="ghost"
+              onClick={() =>
+                go(`audit?object=${encodeURIComponent(asset.code)}`)
+              }
+            >
+              操作审计
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             icon={<History size={16} />}
@@ -270,7 +284,12 @@ export default function ContentDetail({ id }: { id: string }) {
             .filter((b) => !b.page)
             .map((b) => (
               <span className="tag-chip" key={b.tagId}>
-                {state.tags.find((t) => t.id === b.tagId)?.name}
+                {bindingName(b, state.tags)}
+                {state.tags.some(
+                  (t) => t.id === b.tagId && !availableTag(state.tags, t),
+                )
+                  ? "（已停用）"
+                  : ""}
               </span>
             ))}
           {!v.tags.some((b) => !b.page) ? (
@@ -304,7 +323,7 @@ export default function ContentDetail({ id }: { id: string }) {
                       .slice(0, 2)
                       .map((b) => (
                         <small key={b.tagId}>
-                          {state.tags.find((t) => t.id === b.tagId)?.name}
+                          {bindingName(b, state.tags)}
                         </small>
                       ))}
                   </div>
@@ -354,16 +373,25 @@ export default function ContentDetail({ id }: { id: string }) {
             <dd>{v.kind}</dd>
             <dt>来源</dt>
             <dd>{v.source}</dd>
+            <dt>上传时间</dt>
+            <dd>
+              {v.uploadedAt ? dateLabel(v.uploadedAt) : "历史内容，未单独记录"}
+            </dd>
+            <dt>结果确认</dt>
+            <dd>
+              {v.confirmedAt
+                ? `${state.users.find((u) => u.id === v.confirmedBy)?.name || "已失效账号"} · ${dateLabel(v.confirmedAt)}`
+                : "历史内容，未记录人工确认"}
+            </dd>
             <dt>归档时间</dt>
-            <dd>{dateLabel(v.createdAt)}</dd>
+            <dd>{dateLabel(v.archivedAt || v.createdAt)}</dd>
             <dt>有效期</dt>
             <dd>{v.approval.snapshot?.expiry || v.expiry || "未设置"}</dd>
           </dl>
           <h3>摘要</h3>
           <p className="summary-text">{v.summary || "未填写"}</p>
-          {v.cover ? (
-            <AssetImage src={v.cover} alt="内容封面" className="detail-cover" />
-          ) : null}
+          <h3>展示素材</h3>
+          <ContentMedia value={v} />
           {v.sourceUrl ? (
             <a href={v.sourceUrl} target="_blank" rel="noreferrer">
               查看来源原文

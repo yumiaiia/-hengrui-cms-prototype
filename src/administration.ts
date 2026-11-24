@@ -10,6 +10,7 @@ export const menuOptions = [
   { key: "collection", label: "公众号采集" },
   { key: "tags", label: "标签管理" },
   { key: "admin", label: "系统管理" },
+  { key: "audit", label: "操作审计" },
 ];
 export const hasAdminAccess = (role?: Role) =>
   !!role?.permissions.includes("admin") && role.menus.includes("admin");
@@ -120,7 +121,7 @@ export function deleteManagedRole(s: State, id: string) {
   s.roles = s.roles.filter((r) => r.id !== id);
 }
 export function prepareAdministration(s: State) {
-  if (s.administrationRevision === 3) return prepareEmployeeIdentity(s);
+  if (s.administrationRevision === 4) return prepareEmployeeIdentity(s);
   const next = structuredClone(s);
   for (const role of next.roles) {
     role.menus = role.menus.filter((m) =>
@@ -161,6 +162,6 @@ export function prepareAdministration(s: State) {
     admin.roleId = superRoleId;
     admin.enabled = true;
   }
-  next.administrationRevision = 3;
+  next.administrationRevision = 4;
   return prepareEmployeeIdentity(next);
 }

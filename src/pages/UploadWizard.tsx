@@ -1,3 +1,4 @@
+import { ContentMetadataForm } from "../components/ContentMedia";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -9,7 +10,6 @@ import {
 } from "lucide-react";
 import { useCMS } from "../store";
 import {
-  canRole,
   current,
   go,
   kindOf,
@@ -17,25 +17,22 @@ import {
   ocrWarnings,
   safePublicUrl,
   uid,
-  visibleFor,
   type CredentialRevision,
   type Version,
 } from "../model";
 import { makeDemoVersion } from "../seed";
-import { appendUploadVersions, planUploadVersions } from "../upload";
+import { planUploadVersions } from "../upload";
+import { startUploadBatch } from "../uploadReview";
 import { loadBlob, putFiles } from "../storage";
 import {
   acceptApproval,
   approvalDraft,
   approvalFieldErrors,
   ApprovalForm,
-  persistApproval,
 } from "../components/ApprovalEditor";
 import {
-  AssetImage,
   Badge,
   Button,
-  CoverPicker,
   Dialog,
   Empty,
   Field,
@@ -49,6 +46,7 @@ interface Item {
   blob?: Blob;
   size: string;
   error?: string;
+  recommendations?: import("../model").StagedUploadItem["recommendations"];
 }
 const sizeLabel = (size: number) =>
   size < 1024 * 1024
@@ -96,6 +94,8 @@ export default function UploadWizard() {
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState(false);
   const [detailId, setDetailId] = useState<string>();
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const mediaBusyRef = useRef(false);
   const root = useRef<HTMLDivElement>(null);
   const locked = useRef(false);
   const dirty = useRef(false);
@@ -106,6 +106,8 @@ export default function UploadWizard() {
     const guard = () => {
       if (
         locked.current ||
+        mediaBusyRef.current ||
+        document.querySelector('[data-media-busy="true"]') ||
         root.current?.querySelector('[data-approval-busy="true"]')
       ) {
         latest.current.toast("文件正在保存，请稍候。");
@@ -113,7 +115,7 @@ export default function UploadWizard() {
       }
       return (
         !dirty.current ||
-        window.confirm("本批次尚未归档，离开后需要重新添加。确定离开吗？")
+        window.confirm("本批次尚未提交暂存，离开后需要重新添加。确定离开吗？")
       );
     };
     leaveGuard.current = guard;
@@ -237,8 +239,27 @@ export default function UploadWizard() {
         }),
       );
       const next = await readFiles(files);
-      next.forEach((item) => {
+      next.forEach((item, index) => {
+        const sample = makeDemoVersion((assetId ? [0] : [0, 1, 6])[index]);
         item.v.source = "示例文件上传";
+        item.v.content = sample.content;
+        item.v.summary = sample.summary;
+        item.v.pages = sample.pages;
+        item.v.cover = sample.cover;
+        item.v.thumbnail = sample.thumbnail;
+        item.v.previewUrl = sample.previewUrl;
+        const parent = cms.state.tags.find(
+          (t) => t.name === "内容主题" && t.parentId === null,
+        );
+        if (index === 1 && parent)
+          item.recommendations = [
+            {
+              id: uid("staged-recommendation"),
+              name: "免疫治疗长期随访",
+              parentId: parent.id,
+              page: 2,
+            },
+          ];
       });
       if (active.current)
         setItems((list) => (assetId ? next : [...list, ...next]));
@@ -275,7 +296,12 @@ export default function UploadWizard() {
     setError("");
   }
   async function archive(accepted?: CredentialRevision) {
-    if (locked.current) return;
+    if (
+      locked.current ||
+      mediaBusyRef.current ||
+      document.querySelector('[data-media-busy="true"]')
+    )
+      return;
     const ctx = latest.current;
     if (!allowed || !ctx.can("upload"))
       return setError("当前角色不能上传，或内容已作废、不可访问。");
@@ -328,93 +354,44 @@ export default function UploadWizard() {
         .filter((item) => item.blob)
         .map((item) => ({ id: item.id, key: uid("file"), blob: item.blob! }));
       if (files.length) await putFiles(files);
-      let createdCount = 0;
-      let updatedCount = 0;
+      let batchId = "";
       const success = ctx.update(
         (s) => {
-          const actor = s.users.find((user) => user.id === s.userId);
-          const role = s.roles.find((role) => role.id === actor?.roleId);
-          if (
-            !actor ||
-            actor.id !== actorId ||
-            !canRole(role, "upload") ||
-            (mode === "exempt" && !canRole(role, "exempt"))
-          )
-            throw new Error("权限已变化，本批次未归档。");
-          const visible = visibleFor(s, actor, role);
-          const target = assetId
-            ? visible.find((asset) => asset.id === assetId)
-            : undefined;
-          if (
-            assetId &&
-            (!target ||
-              target.lifecycle !== "正常" ||
-              target.current !== baseNumber ||
-              items.length !== 1)
-          )
-            throw new Error(
-              "当前内容版本已变化或不可编辑，请返回详情核对后重新上传。",
-            );
-          const targets = planUploadVersions(visible, items, assetId);
-          createdCount = targets.filter((target) => target.newAsset).length;
-          updatedCount = targets.length - createdCount;
-          const ids = [...new Set(targets.map((target) => target.assetId))];
-          const scope = canRole(role, "edit")
-            ? s.credentials.map((c) => c.id)
-            : [];
-          const approval = persistApproval(
-            s,
-            mode === "registered" ? value : null,
-            actor,
-            ids,
-            scope,
-          );
-          const taskItems = appendUploadVersions(
+          batchId = startUploadBatch(
             s,
             items.map((item) => ({
               id: item.id,
+              recommendations: item.recommendations,
               v: {
                 ...item.v,
                 fileKey: files.find((file) => file.id === item.id)?.key,
                 fileUrl: undefined,
               },
             })),
-            targets,
-            approval,
-            actor.id,
+            mode === "exempt"
+              ? { mode: "exempt" }
+              : { mode: "registered", snapshot: structuredClone(value) },
+            assetId,
+            baseNumber,
+            actorId,
           );
-          s.tasks.unshift({
-            id: uid("task"),
-            name: `${items.length} 份内容 · 解析与自动打标`,
-            type: "解析与打标",
-            status: "处理中",
-            items: taskItems,
-            createdAt: now(),
-            attempts: 1,
-            finishAt: Date.now() + 3500,
-          });
         },
         {
-          action: assetId ? "上传新版本" : "批量归档内容",
-          object: existing?.code || `${items.length} 份内容`,
-          detail:
-            mode === "exempt"
-              ? "无需登记审批信息。"
-              : `本次内容使用审批编号 ${value.number.trim()}、有效期及一张截图。`,
+          action: "提交上传批次",
+          object: `${items.length} 份内容`,
+          detail: "文件已暂存，解析打标后需要人工确认才会归档。",
         },
         "upload",
       );
       if (!success) {
-        setError("归档未保存，请检查浏览器存储和权限后重试；历史内容未变更。");
+        setError("批次未保存，请检查浏览器存储后重试。");
         return;
       }
       dirty.current = false;
       if (window.cmsLeaveGuard === leaveGuard.current)
         window.cmsLeaveGuard = undefined;
-      ctx.toast(
-        `已新增 ${createdCount} 份内容${updatedCount ? `，创建 ${updatedCount} 个新版本` : ""}，解析与打标在后台继续。`,
-      );
-      go(assetId ? `content/${assetId}` : "library?q=");
+      ctx.toast("文件已暂存，正在解析打标。");
+      go(`upload/${batchId}`);
     } catch (error) {
       setError(
         error instanceof Error
@@ -448,7 +425,16 @@ export default function UploadWizard() {
         <ArrowLeft size={16} />
         返回{assetId ? "内容详情" : "内容库"}
       </button>
-      <PageHeader title={assetId ? "上传新版本" : "新增内容"} />
+      <PageHeader
+        title={assetId ? "上传新版本" : "新增内容"}
+        description="文件暂存后解析打标，人工核对结果后正式归档。"
+      />
+      <div className="review-steps">
+        <strong className="active">1 上传内容</strong>
+        <span>2 解析打标</span>
+        <span>3 确认结果</span>
+        <span>4 归档完成</span>
+      </div>
       {error ? (
         <p className="error-text" role="alert">
           {error}
@@ -575,20 +561,27 @@ export default function UploadWizard() {
                       </small>
                     ) : null}
                   </div>
-                  {item.v.thumbnail || item.v.cover ? (
-                    <AssetImage
-                      src={item.v.thumbnail || item.v.cover}
-                      alt={item.v.title}
-                      className="custom-cover-preview"
-                    />
-                  ) : null}
+                  <div
+                    className="upload-asset-summary"
+                    aria-label={`${item.v.title}的补充信息`}
+                  >
+                    <span className={item.v.cover ? "is-filled" : ""}>
+                      封面 {item.v.cover ? "已设置" : "未设置"}
+                    </span>
+                    <span className={item.v.thumbnail ? "is-filled" : ""}>
+                      缩略图 {item.v.thumbnail ? "已设置" : "未设置"}
+                    </span>
+                    <span className={item.v.video ? "is-filled" : ""}>
+                      视频 {item.v.video ? "已上传" : "未上传"}
+                    </span>
+                  </div>
                   <button
                     type="button"
                     className="text-link file-info-button"
-                    aria-label={`编辑${item.v.fileName}信息`}
+                    aria-label={`补充${item.v.fileName}信息`}
                     onClick={() => setDetailId(item.id)}
                   >
-                    信息
+                    补充信息
                   </button>
                   <Badge
                     tone={
@@ -691,54 +684,46 @@ export default function UploadWizard() {
         </span>
         <Button
           variant="primary"
-          disabled={busy || !items.length}
+          disabled={busy || metadataBusy || !items.length}
           icon={busy ? <Loader2 size={16} className="spin" /> : undefined}
           onClick={() => void archive()}
         >
-          {busy ? "正在保存…" : `上传并归档 ${items.length} 份`}
+          {busy ? "正在保存…" : `开始解析打标 ${items.length} 份`}
         </Button>
       </div>
       {detail ? (
         <Dialog
-          title="补充内容信息（选填）"
+          wide
+          title={`补充内容信息 · ${detail.v.title}`}
           onClose={() => {
-            if (!locked.current) setDetailId(undefined);
+            if (!metadataBusy && !locked.current) setDetailId(undefined);
           }}
           footer={
-            <Button disabled={busy} onClick={() => setDetailId(undefined)}>
-              完成
+            <Button
+              variant="primary"
+              disabled={busy || metadataBusy}
+              onClick={() => setDetailId(undefined)}
+            >
+              {metadataBusy ? "素材正在保存…" : "完成"}
             </Button>
           }
         >
-          <Field label="摘要">
-            <textarea
-              aria-label="内容摘要"
-              rows={3}
-              value={detail.v.summary}
-              onChange={(event) =>
-                patch(detail.id, { summary: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="封面">
-            <CoverPicker
-              value={detail.v.cover || ""}
-              label="上传封面"
-              onChange={(value) => patch(detail.id, { cover: value })}
-            />
-          </Field>
-          <Field label="缩略图">
-            <CoverPicker
-              value={detail.v.thumbnail || ""}
-              label="上传缩略图"
-              onChange={(value) => patch(detail.id, { thumbnail: value })}
-            />
-          </Field>
+          <p className="metadata-file-context">
+            当前文件：{detail.v.fileName} · 以下信息仅用于这份文件
+          </p>
+          <ContentMetadataForm
+            value={detail.v}
+            onChange={(changes) => patch(detail.id, changes)}
+            onBusyChange={(value) => {
+              mediaBusyRef.current = value;
+              setMetadataBusy(value);
+            }}
+          />
         </Dialog>
       ) : null}
       {confirming ? (
         <Dialog
-          title="确认上传信息"
+          title="确认审批识别差异"
           onClose={() => setConfirming(false)}
           footer={
             <>
@@ -755,7 +740,7 @@ export default function UploadWizard() {
                   void archive(value);
                 }}
               >
-                确认并上传
+                确认并开始解析
               </Button>
             </>
           }

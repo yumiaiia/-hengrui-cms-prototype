@@ -232,7 +232,11 @@ export default function Publishing({
             replacesId || undefined,
           );
         },
-        undefined,
+        {
+          action: submit ? "提交发布" : "保存发布草稿",
+          object: `${inputs.length} 份内容`,
+          module: "发布管理",
+        },
         "publish",
       );
       if (!ok) return;

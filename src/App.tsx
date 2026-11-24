@@ -5,6 +5,8 @@ import Workbench from "./pages/Workbench";
 import ContentLibrary from "./pages/ContentLibrary";
 import { Button, Empty } from "./components/ui";
 import { go } from "./model";
+const AuditPage = lazy(() => import("./pages/AuditPage"));
+const UploadReview = lazy(() => import("./pages/UploadReview"));
 const UploadWizard = lazy(() => import("./pages/UploadWizard"));
 const ContentDetail = lazy(() => import("./pages/ContentDetail"));
 const Collection = lazy(() => import("./pages/Collection"));
@@ -89,7 +91,7 @@ export default function App() {
         content = <ContentLibrary />;
         break;
       case "upload":
-        content = <UploadWizard />;
+        content = id ? <UploadReview id={id} /> : <UploadWizard />;
         break;
       case "content":
         content = <ContentDetail id={id} />;
@@ -99,6 +101,9 @@ export default function App() {
         break;
       case "tags":
         content = <Tags />;
+        break;
+      case "audit":
+        content = <AuditPage />;
         break;
       case "admin":
         content = <Administration />;

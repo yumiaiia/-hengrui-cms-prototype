@@ -21,14 +21,7 @@ export function ExportDialog({
   onClose: () => void;
   versions?: Record<string, number>;
 }) {
-  const {
-    can,
-    state,
-    update,
-    notify,
-    toast,
-    assets: visible,
-  } = useCMS();
+  const { can, state, update, notify, toast, assets: visible } = useCMS();
   const [evidence, setEvidence] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -94,6 +87,13 @@ export function ExportDialog({
           sourcePublished: v.sourcePublished,
           summary: v.summary,
           author: v.author,
+          video: v.video
+            ? {
+                fileName: v.video.fileName,
+                size: v.video.size,
+                type: v.video.type,
+              }
+            : undefined,
           createdAt: v.createdAt,
           expiry: v.approval.snapshot?.expiry || v.expiry,
           approval: {
@@ -136,6 +136,11 @@ export function ExportDialog({
               await image.arrayBuffer(),
             );
           }
+        if (v.video)
+          files[folder + "media/video/" + clean(v.video.fileName)] =
+            new Uint8Array(
+              await (await loadBlob(v.video.fileKey)).arrayBuffer(),
+            );
         if (evidence && can("evidence"))
           for (const [i, image] of images.entries()) {
             files[

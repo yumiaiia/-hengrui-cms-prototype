@@ -1,3 +1,5 @@
+import { normalizeTagName, requireTagCheck } from "./tagSimilarity";
+import { allowTag, maintainBindings } from "./tagResults";
 import {
   canRole,
   current,
@@ -44,8 +46,7 @@ export function validateTag(
       (t) =>
         t.id !== draft.id &&
         t.parentId === draft.parentId &&
-        t.name.trim().toLocaleLowerCase() ===
-          draft.name.trim().toLocaleLowerCase(),
+        normalizeTagName(t.name) === normalizeTagName(draft.name),
     )
   )
     return "该层级下已有同名标签";
@@ -60,6 +61,18 @@ export function suggestionContexts(s: Suggestion, assets: Asset[]) {
         ? [{ assetId: id, version: asset.current, page: undefined }]
         : [];
     })
+  );
+}
+export function sourceCancelled(
+  s: Suggestion,
+  c: { assetId: string; version: number; page?: number },
+) {
+  return (
+    s.status === "已忽略" ||
+    !!s.cancelled?.some(
+      (x) =>
+        x.assetId === c.assetId && x.version === c.version && x.page === c.page,
+    )
   );
 }
 export function recommendationSources(
@@ -112,6 +125,7 @@ export function recommendationSources(
         asset,
         version,
         accepted,
+        cancelled: sourceCancelled(suggestion, context),
         issue,
       };
     });
@@ -127,6 +141,7 @@ export function pendingSuggestions(
   return state.suggestions.filter(
     (s) =>
       s.status !== "已忽略" &&
+      !sourceCancelled(s, { assetId: asset.id, version, page }) &&
       suggestionContexts(s, state.assets).some(
         (c) =>
           c.assetId === asset.id && c.version === version && c.page === page,
@@ -193,6 +208,22 @@ export function bindTag(
     version.tags.push({ tagId, origin: "人工", page });
     asset.updatedAt = now();
   }
+  allowTag(version, tag, page);
+}
+export function removeTag(
+  state: State,
+  assetId: string,
+  number: number,
+  tagId: string,
+  page?: number,
+) {
+  const { asset, version } = editableVersion(state, assetId, number);
+  maintainBindings(
+    version,
+    version.tags.filter((b) => !(b.tagId === tagId && b.page === page)),
+    state.tags,
+  );
+  asset.updatedAt = now();
 }
 export function acceptSuggestedTag(
   state: State,
@@ -201,12 +232,14 @@ export function acceptSuggestedTag(
   number: number,
   parentId: string,
   page?: number,
+  choice: { receipt?: string } = {},
 ) {
   const { role, version, asset } = editableVersion(state, assetId, number);
   const suggestion = state.suggestions.find((s) => s.id === suggestionId);
   if (
     !suggestion ||
     suggestion.status === "已忽略" ||
+    sourceCancelled(suggestion, { assetId, version: number, page }) ||
     !suggestionContexts(suggestion, state.assets).some(
       (c) => c.assetId === assetId && c.version === number && c.page === page,
     )
@@ -224,14 +257,18 @@ export function acceptSuggestedTag(
   let tag = state.tags.find(
     (t) =>
       t.parentId === parentId &&
-      t.name.trim().toLocaleLowerCase() ===
-        suggestion.name.trim().toLocaleLowerCase(),
+      normalizeTagName(t.name) === normalizeTagName(suggestion.name),
   );
   if (!tag && !canRole(role, "taxonomy"))
     throw new Error("新增推荐标签需要标签管理权限");
   if (tag && !availableTag(state.tags, tag))
     throw new Error("同名标签已停用，请先在标签管理中启用");
   if (!tag) {
+    requireTagCheck(
+      state.tags,
+      { name: suggestion.name, parentId },
+      choice.receipt,
+    );
     tag = {
       id: uid("tag"),
       name: suggestion.name.trim(),
@@ -242,6 +279,13 @@ export function acceptSuggestedTag(
     state.tags.push(tag);
   }
   bindTag(state, assetId, number, tag.id, page);
+  suggestion.resolutions ||= [];
+  suggestion.resolutions.push({
+    assetId,
+    version: number,
+    page,
+    tagId: tag.id,
+  });
   suggestion.accepted ||= [];
   if (
     !suggestion.accepted.some(

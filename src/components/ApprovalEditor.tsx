@@ -105,28 +105,6 @@ export function persistApproval(
       createdBy: actor.id,
     });
   const warnings = ocrWarnings(snapshot);
-  state.audits.unshift({
-    id: uid("ocr-log"),
-    at: now(),
-    user: actor.name,
-    action: warnings.length ? "人工确认 OCR 异常" : "保存审批登记信息",
-    object: number,
-    category: "审批校验",
-    detail: JSON.stringify({
-      assetIds,
-      credentialId,
-      revision: snapshot.revision,
-      rawOCR: snapshot.evidence,
-      warnings,
-      accepted: {
-        number,
-        expiry: snapshot.expiry,
-        title: snapshot.title,
-        confirmed: snapshot.confirmed,
-        confirmation: snapshot.confirmation,
-      },
-    }),
-  });
   if (warnings.length)
     state.notices.unshift({
       id: uid("notice"),

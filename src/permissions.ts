@@ -7,6 +7,18 @@ export interface PermissionModule {
 }
 export const permissionModules: PermissionModule[] = [
   {
+    key: "audit",
+    label: "操作审计",
+    description: "按模块查看用户写入操作",
+    actions: [
+      {
+        key: "audit",
+        label: "查看操作审计",
+        description: "查询用户的模块写入记录，不授予业务编辑或审批截图权限",
+      },
+    ],
+  },
+  {
     key: "workbench",
     label: "工作台",
     description: "查看待办事项与近期发布安排",

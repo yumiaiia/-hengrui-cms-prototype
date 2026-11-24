@@ -135,6 +135,7 @@ export function Dialog({
   wide = false,
   drawer = false,
   portal = false,
+  className = "",
 }: {
   title: string;
   onClose: () => void;
@@ -143,6 +144,7 @@ export function Dialog({
   wide?: boolean;
   drawer?: boolean;
   portal?: boolean;
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -192,7 +194,7 @@ export function Dialog({
       <div
         ref={ref}
         tabIndex={-1}
-        className={`dialog ${wide ? "dialog-wide" : ""} ${drawer ? "dialog-drawer" : ""}`}
+        className={`dialog ${wide ? "dialog-wide" : ""} ${drawer ? "dialog-drawer" : ""} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -382,10 +384,12 @@ export function CoverPicker({
   value,
   onChange,
   label = "上传图片",
+  onBusyChange,
 }: {
   value: string;
   onChange: (value: string) => void;
   label?: string;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const { toast } = useCMS();
   const [busy, setBusy] = useState(false);
@@ -393,6 +397,7 @@ export function CoverPicker({
     if (!file) return;
     if (!file.type.startsWith("image/")) return toast("请选择有效的图片文件。");
     setBusy(true);
+    onBusyChange?.(true);
     try {
       const previewUrl = URL.createObjectURL(file);
       try {
@@ -411,10 +416,11 @@ export function CoverPicker({
       toast("图片无法读取或保存，请重新选择。");
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
   }
   return (
-    <div>
+    <div data-media-busy={busy || undefined}>
       <div className="cover-upload-line">
         <label className="btn btn-secondary">
           <ImagePlus size={14} />
@@ -432,7 +438,12 @@ export function CoverPicker({
           />
         </label>
         {value ? (
-          <button className="text-link" onClick={() => onChange("")}>
+          <button
+            type="button"
+            disabled={busy}
+            className="text-link"
+            onClick={() => onChange("")}
+          >
             清除图片
           </button>
         ) : null}

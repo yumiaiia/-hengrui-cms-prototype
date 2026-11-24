@@ -11,6 +11,7 @@ import {
 export interface UploadInput {
   id: string;
   v: Version;
+  recommendations?: import("./model").StagedUploadItem["recommendations"];
 }
 export interface UploadTarget {
   assetId: string;

@@ -11,7 +11,8 @@ export type Permission =
   | "void"
   | "export"
   | "evidence"
-  | "admin";
+  | "admin"
+  | "audit";
 export const permissionNames: Record<Permission, string> = {
   upload: "上传内容",
   edit: "编辑内容与审批",
@@ -23,6 +24,7 @@ export const permissionNames: Record<Permission, string> = {
   export: "下载与导出",
   evidence: "查看与下载审批截图",
   admin: "用户与角色管理",
+  audit: "查看操作审计",
 };
 export const accounts = ["自免医时空", "爱医慢时空", "爱医时空", "爱眼医时空"];
 export const primaryTagId = (name: string) =>
@@ -57,11 +59,24 @@ export interface Binding {
   tagId: string;
   origin: "AI" | "人工";
   page?: number;
+  name?: string;
+  parentId?: string;
+}
+export interface TagExclusion {
+  name: string;
+  parentId: string;
+  page?: number;
 }
 export interface Approval {
   mode: "pending" | "registered" | "exempt";
   credentialId?: string;
   snapshot?: CredentialRevision;
+}
+export interface SupplementaryVideo {
+  fileKey: string;
+  fileName: string;
+  size: number;
+  type: string;
 }
 export interface Version {
   number: number;
@@ -77,14 +92,20 @@ export interface Version {
   sourcePublished?: string;
   cover?: string;
   thumbnail?: string;
+  video?: SupplementaryVideo;
   summary: string;
   author?: string;
   content: string[];
   pages: number;
   createdAt: string;
+  uploadedAt?: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+  archivedAt?: string;
   process: Process;
   tagStatus: "待打标" | "打标中" | "已完成" | "未匹配" | "失败";
   tags: Binding[];
+  tagExclusions?: TagExclusion[];
   approval: Approval;
   expiry?: string;
   unmatched?: string;
@@ -153,7 +174,14 @@ export interface Suggestion {
   assetIds: string[];
   contexts?: { assetId: string; version: number; page?: number }[];
   accepted?: { assetId: string; version: number; page?: number }[];
+  cancelled?: { assetId: string; version: number; page?: number }[];
   status: "待处理" | "已采纳" | "已忽略";
+  resolutions?: {
+    assetId: string;
+    version: number;
+    page?: number;
+    tagId: string;
+  }[];
 }
 export interface TaskItem {
   assetId?: string;
@@ -169,6 +197,7 @@ export interface Task {
   name: string;
   type: "解析与打标" | "OCR" | "采集" | "导出" | "标签匹配";
   tagIds?: string[];
+  batchId?: string;
   actorId?: string;
   result?: { added: number; affected: number; skipped: number };
   status: Process;
@@ -222,6 +251,18 @@ export interface User {
   roleId: string;
   createdAt: string;
 }
+export interface AuditChange {
+  object: string;
+  objectId: string;
+  version?: number;
+  page?: number;
+  field: string;
+  before: string;
+  after: string;
+  route?: string;
+}
+export type AuditModule =
+  "内容库" | "发布管理" | "标签管理" | "系统管理" | "公众号采集";
 export interface Audit {
   id: string;
   at: string;
@@ -230,6 +271,15 @@ export interface Audit {
   object: string;
   detail: string;
   category: "内容" | "审批校验" | "标签" | "系统";
+  module?: AuditModule;
+  summary?: string;
+  actorId?: string;
+  employeeId?: string;
+  source?: "人工" | "系统";
+  initiator?: string;
+  result?: "成功" | "失败" | "部分成功";
+  changes?: AuditChange[];
+  batchId?: string;
 }
 export interface Notice {
   id: string;
@@ -239,9 +289,50 @@ export interface Notice {
   read: boolean;
   at: string;
   adminOnly?: boolean;
+  recipientId?: string;
+}
+export interface StagedUploadItem {
+  id: string;
+  v: Version;
+  targetId?: string;
+  baseVersion?: number;
+  revision: number;
+  confirmedRevision?: number;
+  confirmedBy?: string;
+  confirmedAt?: string;
+  noApplicableTags?: boolean;
+  manualTagging?: boolean;
+  finishAt?: number;
+  error?: string;
+  archiveError?: string;
+  archived?: { assetId: string; version: number; at: string };
+  cancelled?: { at: string; by: string };
+  baseline?: string;
+  tagSnapshot?: Tag[];
+  confirmedTags?: string;
+  recommendations?: {
+    id: string;
+    name: string;
+    parentId: string;
+    page?: number;
+    resolved?: boolean;
+    resolvedTagId?: string;
+    cancelled?: boolean;
+    suggestionId?: string;
+  }[];
+}
+export interface UploadBatch {
+  id: string;
+  ownerId: string;
+  createdAt: string;
+  kind?: "tags";
+  tagSnapshot?: Tag[];
+  items: StagedUploadItem[];
 }
 export interface State {
   schema: 2;
+  reviewRevision?: number;
+  uploadBatches?: UploadBatch[];
   recommendationRevision?: number;
   assets: Asset[];
   credentials: Credential[];

@@ -50,6 +50,7 @@ export function reparseFile(
     id: uid("task"),
     name: version.title + " · 重新解析",
     type: "解析与打标",
+    actorId: user.id,
     status: "处理中",
     items: [
       {

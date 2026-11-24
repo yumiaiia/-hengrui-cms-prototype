@@ -1,3 +1,5 @@
+import { captureBindingNames } from "./tagResults";
+import { similarTags, normalizeTagName } from "./tagSimilarity";
 import { canRole, uid, type State, type Tag } from "./model";
 import { validateTag } from "./taxonomy";
 import { tagImpact, tagUsage } from "./tagMatching";
@@ -14,6 +16,8 @@ export interface TagImportRow {
 }
 export interface TagImportPreview {
   tags: Tag[];
+  input: TagImportRow[];
+  decisions: Record<string, "keep" | "skip">;
   rows: {
     sheet: string;
     row: number;
@@ -21,6 +25,13 @@ export interface TagImportPreview {
     action: string;
     changes?: string;
     error?: string;
+    similar?: {
+      id: string;
+      name: string;
+      parentId: string | null;
+      enabled: boolean;
+    }[];
+    decision?: "keep" | "skip";
   }[];
   added: number;
   updated: number;
@@ -120,11 +131,13 @@ export async function readTagWorkbook(
 export function previewTagImport(
   state: State,
   input: TagImportRow[],
+  decisions: Record<string, "keep" | "skip"> = {},
 ): TagImportPreview {
   const tags = structuredClone(state.tags),
     rows: TagImportPreview["rows"] = [],
     seen = new Set<string>(),
     changed: string[] = [];
+  const assignedIds = new Map<string, string>();
   let added = 0,
     updated = 0,
     unchanged = 0;
@@ -132,6 +145,17 @@ export function previewTagImport(
     (a, b) => Number(a.sheet === "标签") - Number(b.sheet === "标签"),
   )) {
     try {
+      const decision = decisions[`${row.sheet}-${row.row}`];
+      if (decision === "skip") {
+        rows.push({
+          sheet: row.sheet,
+          row: row.row,
+          name: row.name,
+          action: "跳过",
+          decision,
+        });
+        continue;
+      }
       if (row.error) throw new Error(row.error);
       const root = row.sheet === "标签分类";
       const parent = root
@@ -141,8 +165,8 @@ export function previewTagImport(
           : tags.find(
               (t) =>
                 t.parentId === null &&
-                t.name.toLocaleLowerCase() ===
-                  row.parentName?.trim().toLocaleLowerCase(),
+                normalizeTagName(t.name) ===
+                  normalizeTagName(row.parentName || ""),
             );
       if (!root && !parent) throw new Error("所属标签分类不存在");
       const old = row.id
@@ -150,8 +174,7 @@ export function previewTagImport(
         : tags.find(
             (t) =>
               t.parentId === (parent?.id || null) &&
-              t.name.toLocaleLowerCase() ===
-                row.name.trim().toLocaleLowerCase(),
+              normalizeTagName(t.name) === normalizeTagName(row.name),
           );
       if (old && (old.parentId === null) !== root)
         throw new Error("不能改变标签级别");
@@ -172,6 +195,10 @@ export function previewTagImport(
           (key) => old[key as keyof Tag] === tag[key as keyof Tag],
         );
       const action = !old ? "新增" : same ? "无变化" : "更新";
+      const similar =
+        !old || old.name !== tag.name || old.parentId !== tag.parentId
+          ? similarTags(tags, tag).map((x) => x.tag)
+          : [];
       const changes =
         old && !same
           ? [
@@ -182,6 +209,7 @@ export function previewTagImport(
               .join("；")
           : "";
       if (!old) {
+        if (!row.id) assignedIds.set(`${row.sheet}-${row.row}`, tag.id);
         tags.push(tag);
         added++;
       } else if (same) unchanged++;
@@ -196,6 +224,8 @@ export function previewTagImport(
         name: row.name,
         action,
         changes,
+        similar,
+        decision,
       });
     } catch (e) {
       rows.push({
@@ -209,6 +239,11 @@ export function previewTagImport(
   }
   return {
     tags,
+    input: input.map((row) => ({
+      ...structuredClone(row),
+      id: assignedIds.get(`${row.sheet}-${row.row}`) || row.id,
+    })),
+    decisions: { ...decisions },
     rows,
     added,
     updated,
@@ -224,5 +259,19 @@ export function applyTagImport(s: State, preview: TagImportPreview) {
   if (preview.rows.some((r) => r.error)) throw new Error("请先修正导入错误");
   if (JSON.stringify(s.tags) !== preview.baseline)
     throw new Error("标签库已变化，请重新导入预览");
-  s.tags = structuredClone(preview.tags);
+  const checked = previewTagImport(s, preview.input, preview.decisions);
+  if (checked.rows.some((r) => r.error)) throw new Error("请先修正导入错误");
+  if (checked.rows.some((r) => r.similar?.length && r.decision !== "keep"))
+    throw new Error("请处理全部相似标签提示");
+  if (
+    checked.tags.some((t) =>
+      s.tags.some(
+        (old) =>
+          old.id === t.id &&
+          (old.name !== t.name || old.parentId !== t.parentId),
+      ),
+    )
+  )
+    captureBindingNames(s);
+  s.tags = structuredClone(checked.tags);
 }
