@@ -44,6 +44,7 @@ export function pageHits(
     if (
       v.process !== "完成" ||
       fileParsingFailed(v) ||
+      !paginated(v) ||
       !matchesTags(
         v.tags.filter((b) => !b.page),
         materialTags,
@@ -51,11 +52,9 @@ export function pageHits(
       )
     )
       return [];
-    const count = paginated(v) ? v.pages : 1;
+    const count = v.pages;
     return Array.from({ length: count }, (_, i) => i + 1).flatMap((page) => {
-      const bindings = v.tags.filter(
-        (b) => b.page === page || (!paginated(v) && !b.page),
-      );
+      const bindings = v.tags.filter((b) => b.page === page);
       const text = [
         v.title,
         asset.code,
@@ -84,7 +83,7 @@ export function publicationProblems(asset: Asset, v: Version) {
   ].filter(Boolean) as string[];
 }
 export function prepareWorkspace(state: State): State {
-  if (state.workspaceRevision === 5) return state;
+  if (state.workspaceRevision === 7) return state;
   const s = structuredClone(state);
   for (const role of s.roles)
     if (role.menus.includes("library") && !role.menus.includes("publishing"))
@@ -180,6 +179,17 @@ export function prepareWorkspace(state: State): State {
       !s.tags.some((old) => old.name === t.name && old.parentId === t.parentId)
     )
       s.tags.push(structuredClone(t));
+  // 用户可见范围为派生标签目标，仅允许人工与派生规则添加，AI 链路排除。
+  for (const t of s.tags)
+    if (t.parentId === primaryTagId("用户可见范围")) t.manualOnly = true;
+  // 演示用写死集合预置值（正式值待上线前按初始化清单替换）。
+  for (const name of ["指南共识", "临床研究"]) {
+    const tag = s.tags.find((t) => t.parentId && t.name === name);
+    if (tag) {
+      tag.locked = true;
+      tag.enabled = true;
+    }
+  }
   const obsolete = [
     "产品 / 品牌",
     "产品线",
@@ -322,7 +332,7 @@ export function prepareWorkspace(state: State): State {
       s.publications!.unshift(p);
     }
   }
-  s.workspaceRevision = 5;
+  s.workspaceRevision = 7;
   return s;
 }
 function locationOrigin() {

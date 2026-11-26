@@ -35,12 +35,8 @@ export function saveManagedUser(
   const name = input.name.trim(),
     employeeId = normalizeEmployeeId(input.employeeId);
   if (!name) throw new Error("请输入姓名。");
-  if (
-    !employeeId ||
-    employeeId.length > 64 ||
-    /[\s@\u0000-\u001f\u007f]/u.test(employeeId)
-  )
-    throw new Error("请输入有效的工号（不超过 64 个字符，不能包含空格或 @）。");
+  if (!/^\d{1,64}$/.test(employeeId))
+    throw new Error("请输入有效的工号（1~64 位纯数字，保留前导零）。");
   if (
     s.users.some(
       (u) =>

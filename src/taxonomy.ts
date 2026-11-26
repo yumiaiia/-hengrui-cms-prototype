@@ -1,5 +1,5 @@
 import { normalizeTagName, requireTagCheck } from "./tagSimilarity";
-import { allowTag, maintainBindings } from "./tagResults";
+import { allowTag, applyDerivedTags, maintainBindings } from "./tagResults";
 import {
   canRole,
   current,
@@ -28,6 +28,9 @@ export const availableTag = (tags: Tag[], tag: Tag) =>
         parent.parentId === null &&
         parent.enabled,
     ));
+/** 不参与 AI 匹配集合在所有自动打标链路中排除，仅允许人工添加。 */
+export const aiEligibleTag = (tags: Tag[], tag: Tag) =>
+  availableTag(tags, tag) && !tag.manualOnly;
 export function validateTag(
   tags: Tag[],
   draft: Pick<Tag, "name" | "parentId"> & { id?: string },
@@ -206,6 +209,11 @@ export function bindTag(
     throw new Error("请选择已启用的二级标签");
   if (!version.tags.some((b) => b.tagId === tagId && b.page === page)) {
     version.tags.push({ tagId, origin: "人工", page });
+    version.tags = applyDerivedTags(
+      version.tags,
+      version.tagExclusions,
+      state.tags,
+    );
     asset.updatedAt = now();
   }
   allowTag(version, tag, page);

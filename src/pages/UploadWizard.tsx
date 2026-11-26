@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { useCMS } from "../store";
 import {
-  current,
   go,
   kindOf,
   now,
@@ -82,12 +81,7 @@ export default function UploadWizard() {
   const [items, setItems] = useState<Item[]>([]);
   const [links, setLinks] = useState("");
   const [mode, setMode] = useState<"registered" | "exempt">("registered");
-  const [draft, setDraft] = useState<CredentialRevision>(() =>
-    approvalDraft(
-      existing ? current(existing).approval.snapshot : undefined,
-      existing ? current(existing).approval.credentialId : undefined,
-    ),
-  );
+  const [draft, setDraft] = useState<CredentialRevision>(() => approvalDraft());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -173,6 +167,8 @@ export default function UploadWizard() {
       if (kind) {
         try {
           if (!file.size) throw new Error("文件为空");
+          if (file.size > 1024 * 1024 * 1024)
+            throw new Error("单个文件大小不能超过 1 GB");
           const bytes = await file.arrayBuffer();
           if (kind === "PDF") {
             const { PDFDocument } = await import("pdf-lib");
@@ -195,7 +191,6 @@ export default function UploadWizard() {
             v.content = [
               dom.body.textContent?.trim() || "该 HTML 文件没有可提取的正文。",
             ];
-            v.summary = v.content[0].slice(0, 100);
           }
         } catch {
           item.error = "文件无法读取或格式无效，请移除后重新添加。";
@@ -205,10 +200,15 @@ export default function UploadWizard() {
     }
     return next;
   }
+  function overBatchLimit(extra: number) {
+    return !assetId && items.length + extra > 50;
+  }
   async function addFiles(files: File[]) {
     if (locked.current || !allowed || !files.length) return;
     if (assetId && files.length !== 1)
       return setError("上传新版本一次只能添加一个文件。");
+    if (overBatchLimit(files.length))
+      return setError("单批次最多上传 50 份内容，请分批提交。");
     locked.current = true;
     dirty.current = true;
     setBusy(true);
@@ -226,6 +226,8 @@ export default function UploadWizard() {
   }
   async function addDemo() {
     if (locked.current || !allowed) return;
+    if (overBatchLimit(assetId ? 1 : 3))
+      return setError("单批次最多上传 50 份内容，请分批提交。");
     locked.current = true;
     dirty.current = true;
     setBusy(true);
@@ -281,6 +283,8 @@ export default function UploadWizard() {
       return setError("请逐行填写不含账号密码的 HTTP / HTTPS 公开链接。");
     if (assetId && urls.length !== 1)
       return setError("上传新版本一次只能添加一个公开链接。");
+    if (overBatchLimit(urls.length))
+      return setError("单批次最多上传 50 份内容，请分批提交。");
     const next: Item[] = urls.map((url) => {
       const v = fileVersion("公开链接内容.html", "网页");
       v.source = "公开链接";
@@ -322,6 +326,7 @@ export default function UploadWizard() {
     for (const item of items) {
       if (!item.v.title.trim()) invalid[item.id] = "内容标题必填";
       else if (item.error) invalid[item.id] = item.error;
+      else if (duplicateIds.has(item.id)) invalid[item.id] = duplicateMessage;
       else if (!item.blob && !item.v.sourceUrl)
         invalid[item.id] = "请添加原文件或公开链接。";
       else if (item.v.sourceUrl && !safePublicUrl(item.v.sourceUrl))
@@ -409,6 +414,21 @@ export default function UploadWizard() {
     : [];
   const newCount = uploadTargets.filter((target) => target.newAsset).length;
   const versionCount = uploadTargets.length - newCount;
+  const duplicateIds = new Set<string>();
+  {
+    const seen = new Map<string, string>();
+    for (const item of items) {
+      const key = item.v.sourceUrl || item.v.fileHash || "";
+      if (!key) continue;
+      const first = seen.get(key);
+      if (first) {
+        duplicateIds.add(item.id);
+        duplicateIds.add(first);
+      } else seen.set(key, item.id);
+    }
+  }
+  const duplicateMessage =
+    "同一批次内重复文件或相同公开链接仅允许上传 1 份，请移除重复项";
   if (!allowed)
     return (
       <Empty
@@ -518,7 +538,11 @@ export default function UploadWizard() {
             <div className="upload-file-list">
               {items.map((item, index) => (
                 <div
-                  className={`file-row ${rowErrors[item.id] ? "field-error" : ""}`}
+                  className={`file-row ${
+                    rowErrors[item.id] || duplicateIds.has(item.id)
+                      ? "field-error"
+                      : ""
+                  }`}
                   key={item.id}
                 >
                   <div className="file-meta">
@@ -545,9 +569,15 @@ export default function UploadWizard() {
                     {item.v.sourceUrl ? (
                       <small>{item.v.sourceUrl}</small>
                     ) : null}
-                    {item.error || rowErrors[item.id] ? (
+                    {item.error ||
+                    rowErrors[item.id] ||
+                    duplicateIds.has(item.id) ? (
                       <small className="error-text">
-                        {item.error || rowErrors[item.id]}
+                        {item.error ||
+                          rowErrors[item.id] ||
+                          (duplicateIds.has(item.id)
+                            ? duplicateMessage
+                            : "")}
                       </small>
                     ) : null}
                     {uploadTargets[index] && !uploadTargets[index].newAsset ? (
@@ -571,8 +601,10 @@ export default function UploadWizard() {
                     <span className={item.v.thumbnail ? "is-filled" : ""}>
                       缩略图 {item.v.thumbnail ? "已设置" : "未设置"}
                     </span>
-                    <span className={item.v.video ? "is-filled" : ""}>
-                      视频 {item.v.video ? "已上传" : "未上传"}
+                    <span
+                      className={item.v.videos?.length ? "is-filled" : ""}
+                    >
+                      视频 {item.v.videos?.length || 0}/3
                     </span>
                   </div>
                   <button
@@ -585,14 +617,14 @@ export default function UploadWizard() {
                   </button>
                   <Badge
                     tone={
-                      item.error
+                      item.error || duplicateIds.has(item.id)
                         ? "red"
                         : uploadTargets[index]?.newAsset
                           ? "gray"
                           : "blue"
                     }
                   >
-                    {item.error
+                    {item.error || duplicateIds.has(item.id)
                       ? "需处理"
                       : uploadTargets[index]?.newAsset
                         ? "新增内容"
@@ -621,9 +653,9 @@ export default function UploadWizard() {
             <h2>审批信息</h2>
             <p className="approval-scope-hint">
               应用于本次上传的 {items.length} 份内容
-              {versionCount > 0 ? (
+              {versionCount > 0 || assetId ? (
                 <span className="upload-approval-version-note">
-                  新版本采用本次审批信息；编号与原版本不同时，以本次填写为准。
+                  新版本不带入原版本的审批截图与编号，需重新登记；如需沿用可在下方点击「使用已有审批信息」显式复用。
                 </span>
               ) : null}
             </p>

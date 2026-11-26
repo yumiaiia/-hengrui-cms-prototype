@@ -46,19 +46,19 @@ describe("账号与角色管理", () => {
     expect(s.roles.find((r) => r.id === "admin")?.name).toBe("超级管理员");
     expect(prepareAdministration(s)).toBe(s);
   });
-  it("支持创建角色并通过工号创建账号，工号忽略大小写和两端空格", () => {
+  it("支持创建角色并通过工号创建账号，工号保留前导零并去首尾空格", () => {
     const s = setup();
     saveManagedRole(s, role(), true);
     saveManagedUser(s, {
       name: "测试用户",
-      employeeId: " hr00123 ",
+      employeeId: " 000123 ",
       roleId: "custom-role",
     });
-    expect(s.users.at(-1)?.employeeId).toBe("HR00123");
+    expect(s.users.at(-1)?.employeeId).toBe("000123");
     expect(() =>
       saveManagedUser(s, {
         name: "另一用户",
-        employeeId: "HR00123",
+        employeeId: "000123",
         roleId: "custom-role",
       }),
     ).toThrow("工号已存在");

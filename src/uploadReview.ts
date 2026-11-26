@@ -3,6 +3,7 @@ import {
   credentialErrors,
   current,
   now,
+  pushNotice,
   uid,
   type State,
   type UploadBatch,
@@ -11,21 +12,33 @@ import {
   type Approval,
 } from "./model";
 import {
+  aiEligibleTag,
   availableTag,
   pendingRecommendationsForVersion,
   suggestionContexts,
 } from "./taxonomy";
 import { normalizeTagName } from "./tagSimilarity";
 import {
+  applyDerivedTags,
   boundDefinitions,
   excludeTag,
   exclusionMatches,
   maintainBindings,
   stampBinding,
-  tagDefinitions,
 } from "./tagResults";
 import { retryTagMatching } from "./tagMatching";
 import { planUploadVersions, type UploadInput } from "./upload";
+// 新版本静默继承上一版全部补充视频（保持顺序），再追加本次新传，上限 3 个。
+function mergeVideos(previous?: Version["videos"], added?: Version["videos"]) {
+  const merged = [
+    ...(previous ? structuredClone(previous) : []),
+    ...(added ? structuredClone(added) : []),
+  ];
+  const unique = merged
+    .filter((v, index) => merged.findIndex((x) => x.fileKey === v.fileKey) === index)
+    .slice(0, 3);
+  return unique.length ? unique : undefined;
+}
 export function visibleBatches(s: State) {
   const actor = s.users.find((u) => u.id === s.userId);
   if (!actor || actor.enabled === false) return [];
@@ -132,6 +145,7 @@ export function startUploadBatch(
           approval: structuredClone(approval),
           cover: input.v.cover ?? previous?.cover,
           thumbnail: input.v.thumbnail ?? previous?.thumbnail,
+          videos: mergeVideos(previous?.videos, input.v.videos),
           process: "处理中",
           tagStatus: "打标中",
         },
@@ -195,11 +209,6 @@ export function reviewProblems(
       JSON.stringify(current(asset)) !== item.baseline
     )
       problems.push("正式内容已变化，请重新同步本文件");
-    if (
-      tagDefinitions(item.tagSnapshot || batch.tagSnapshot || []) !==
-      tagDefinitions(s.tags)
-    )
-      problems.push("标签库已更新，请重新同步本文件");
     return problems;
   }
   if (v.approval.mode === "pending")
@@ -232,7 +241,7 @@ export function patchStaged(
   patch: Partial<
     Pick<
       Version,
-      "title" | "summary" | "tags" | "cover" | "thumbnail" | "video"
+      "title" | "summary" | "tags" | "cover" | "thumbnail" | "videos"
     >
   >,
   flags: Partial<
@@ -246,7 +255,7 @@ export function patchStaged(
     "tags",
     "cover",
     "thumbnail",
-    "video",
+    "videos",
   ]);
   if (Object.keys(patch).some((key) => !allowed.has(key)))
     throw new Error("提交后不能更换源文件或修改审批信息。");
@@ -273,6 +282,11 @@ export function patchStaged(
         throw new Error("只能添加已启用标签。");
     }
     maintainBindings(item.v, tags, s.tags);
+    item.v.tags = applyDerivedTags(
+      item.v.tags,
+      item.v.tagExclusions,
+      s.tags,
+    );
   }
   Object.assign(item.v, structuredClone(metadata));
   Object.assign(item, flags);
@@ -334,15 +348,18 @@ export function restoreStagedRecommendation(
   invalidate(item);
 }
 export function confirmStaged(s: State, batchId: string, itemId: string) {
-  const { item, actor, role, batch } = editable(s, batchId, itemId);
+  const { item, actor } = editable(s, batchId, itemId);
   if (
-    batch.kind !== "tags" &&
-    item.v.approval.mode === "exempt" &&
-    !canRole(role, "exempt")
+    ["排队中", "处理中"].includes(item.v.process) ||
+    parseFailed(item.v)
   )
-    throw new Error("免登记权限已变化。");
-  const problems = reviewProblems(s, item, batch);
-  if (problems.length) throw new Error(problems.join("；"));
+    throw new Error("请先完成文件解析，再确认结果。");
+  if (Object.values(item.v.pageStates || {}).some((p) => p.status === "失败"))
+    throw new Error("存在页面解析失败，请重新解析");
+  if (item.v.tagStatus === "待打标" || item.v.tagStatus === "打标中")
+    throw new Error("标签识别尚未完成，请稍后确认。");
+  if (item.v.tagStatus === "失败" && !item.manualTagging)
+    throw new Error("请重试打标或人工完成标签核对后再确认。");
   item.confirmedRevision = item.revision;
   item.confirmedAt = now();
   item.confirmedBy = actor.id;
@@ -405,7 +422,7 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
         .filter(
           (t) =>
             t.parentId &&
-            availableTag(s.tags, t) &&
+            aiEligibleTag(s.tags, t) &&
             text.includes(t.name.normalize("NFKC").toLowerCase()),
         )
         .map((t) => ({ tagId: t.id, origin: "AI" as const }));
@@ -424,7 +441,7 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
         for (const tag of s.tags.filter(
           (t) =>
             t.parentId &&
-            availableTag(s.tags, t) &&
+            aiEligibleTag(s.tags, t) &&
             body.includes(t.name.normalize("NFKC").toLowerCase()),
         ))
           if (!item.v.tags.some((b) => b.tagId === tag.id && b.page === page))
@@ -436,16 +453,18 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
           { status: "完成" as const },
         ]),
       );
+      item.v.tags = applyDerivedTags(
+        item.v.tags,
+        item.v.tagExclusions,
+        s.tags,
+      );
     }
     if (due.length)
-      s.notices.unshift({
-        id: uid("notice"),
+      pushNotice(s, {
         title: "解析打标完成，待确认归档",
-        detail: `${due.length} 份内容可核对结果，尚未进入正式内容库。`,
+        detail: `${due.length} 份内容已完成解析打标，请核对后归档。`,
         route: `upload/${batch.id}`,
         recipientId: batch.ownerId,
-        read: false,
-        at: now(),
       });
   }
 }
@@ -473,15 +492,33 @@ export function archiveStaged(
       if (issues.length) throw new Error(issues.join("；"));
       if (batch.kind === "tags") {
         const asset = s.assets.find((a) => a.id === item.targetId)!;
-        const v = current(asset);
-        v.tags = structuredClone(item.v.tags);
-        v.tagExclusions = structuredClone(item.v.tagExclusions);
+        const base =
+          asset.versions.find((v) => v.number === item.baseVersion) ||
+          current(asset);
+        const at = now(),
+          number = Math.max(...asset.versions.map((v) => v.number)) + 1;
+        const version: Version = {
+          ...structuredClone(base),
+          tags: applyDerivedTags(
+            item.v.tags,
+            item.v.tagExclusions,
+            s.tags,
+          ).map((b) => stampBinding(b, s.tags)),
+          tagExclusions: structuredClone(item.v.tagExclusions),
+          number,
+          createdAt: at,
+          archivedAt: at,
+          confirmedAt: item.confirmedAt,
+          confirmedBy: item.confirmedBy,
+          process: "完成",
+          changeNote: "标签更新确认后归档新版本",
+        };
         for (const r of item.recommendations || []) {
           const suggestion = s.suggestions.find((x) => x.id === r.suggestionId);
           if (!suggestion || !r.resolved) continue;
           const context = {
             assetId: asset.id,
-            version: asset.current,
+            version: number,
             page: r.page,
           };
           const key = r.cancelled ? "cancelled" : "accepted";
@@ -495,13 +532,24 @@ export function archiveStaged(
           )
             (suggestion[key] ||= []).push(context);
         }
-        const pending = pendingRecommendationsForVersion(s, asset).length > 0;
-        v.tagStatus = pending ? "未匹配" : "已完成";
-        v.unmatched = pending ? "有推荐标签可后续处理。" : undefined;
+        asset.versions.push(version);
+        asset.current = number;
         asset.updatedAt = now();
+        // 内容升版后，历史版本上未处理的推荐随内容快照迁移到新版本。
+        for (const suggestion of s.suggestions)
+          for (const context of suggestion.contexts || [])
+            if (
+              context.assetId === asset.id &&
+              context.version === item.baseVersion
+            )
+              context.version = number;
+        const pending =
+          pendingRecommendationsForVersion(s, asset, number).length > 0;
+        version.tagStatus = pending ? "未匹配" : "已完成";
+        version.unmatched = pending ? "有推荐标签可后续处理。" : undefined;
         item.archived = {
           assetId: asset.id,
-          version: asset.current,
+          version: number,
           at: now(),
         };
         item.archiveError = undefined;
@@ -526,7 +574,11 @@ export function archiveStaged(
           : 1;
       const version: Version = {
         ...structuredClone(item.v),
-        tags: item.v.tags.map((b) => stampBinding(b, s.tags)),
+        tags: applyDerivedTags(
+          item.v.tags,
+          item.v.tagExclusions,
+          s.tags,
+        ).map((b) => stampBinding(b, s.tags)),
         number,
         createdAt: at,
         archivedAt: at,
@@ -615,17 +667,18 @@ export function archiveStaged(
     }
   }
   if (result.success)
-    s.notices.unshift({
-      id: uid("notice"),
-      title: batch.kind === "tags" ? "标签更新完成" : "内容归档完成",
+    pushNotice(s, {
+      title: batch.kind === "tags" ? "标签更新归档完成" : "内容归档完成",
       detail:
         batch.kind === "tags"
-          ? `已更新 ${result.success} 份内容的标签。`
-          : `成功归档 ${result.success} 份内容。`,
+          ? `已为 ${result.success} 份内容创建新版本并更新标签${
+              result.failed ? `，${result.failed} 份需处理` : ""
+            }。`
+          : `成功归档 ${result.success} 份内容${
+              result.failed ? `，${result.failed} 份需处理` : ""
+            }。`,
       route: `upload/${batch.id}`,
       recipientId: batch.ownerId,
-      read: false,
-      at: now(),
     });
   return result;
 }

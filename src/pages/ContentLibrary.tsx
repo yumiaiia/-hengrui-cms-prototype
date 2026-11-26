@@ -107,7 +107,6 @@ export default function ContentLibrary() {
   const [exporting, setExporting] = useState(false);
   const [exportHistory, setExportHistory] = useState(params.has("exports"));
   const [action, setAction] = useState("");
-  const [reason, setReason] = useState("");
   useEffect(() => {
     sessionStorage.setItem(cache, JSON.stringify(filters));
   }, [cache, filters]);
@@ -186,28 +185,26 @@ export default function ContentLibrary() {
   );
   function run() {
     if (action === "void") {
-      if (!reason.trim()) return toast("请填写作废原因。");
+      const voidable = chosen.filter((a) => a.lifecycle === "正常");
+      if (!voidable.length) return toast("所选内容均已作废。");
       update(
         (s) => {
           s.assets
-            .filter((a) => selected.includes(a.id))
+            .filter((a) => voidable.some((v) => v.id === a.id))
             .forEach((a) => {
               a.lifecycle = "已作废";
-              a.voidReason = reason;
               a.updatedAt = now();
             });
         },
         {
           action: "批量作废内容",
-          object: `${selected.length} 份内容`,
-          detail: reason,
+          object: `${voidable.length} 份内容`,
         },
         "void",
       );
     }
     setAction("");
     setSelected([]);
-    setReason("");
   }
   const label = (key: string, value: string) =>
     key === "approval"
@@ -222,7 +219,7 @@ export default function ContentLibrary() {
         update(
           (draft) => reparseFile(draft, assetId, version),
           {
-            action: "重试文件解析",
+            action: "重试解析任务",
             object: asset?.code || "内容文件",
             module: "内容库",
           },
@@ -737,14 +734,9 @@ export default function ContentLibrary() {
               }
             >
               <p className="dialog-intro">
-                将处理所选的 {chosen.length} 份内容。
+                将作废所选的 {chosen.filter((a) => a.lifecycle === "正常").length}{" "}
+                份内容（已作废项自动跳过），作废后不可恢复。
               </p>
-              <Field label="作废原因" required>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                />
-              </Field>
             </Dialog>
           ) : null}
         </>

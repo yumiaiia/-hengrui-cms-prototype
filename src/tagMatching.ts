@@ -2,6 +2,7 @@ import {
   canRole,
   current,
   now,
+  pushNotice,
   uid,
   type State,
   type Tag,
@@ -11,13 +12,14 @@ import {
   visibleFor,
 } from "./model";
 import {
+  aiEligibleTag,
   availableTag,
   pendingRecommendationsForVersion,
   pendingSuggestions,
   suggestionContexts,
 } from "./taxonomy";
 import { paginated } from "./workflow";
-import { exclusionMatches, stampBinding, tagDefinitions } from "./tagResults";
+import { applyDerivedTags, exclusionMatches, stampBinding, tagDefinitions } from "./tagResults";
 
 export function tagUsage(state: State, ids: string[]) {
   const all = new Set(
@@ -69,7 +71,7 @@ export function matchingResult(v: Version, tags: Tag[]) {
     )
   )
     throw new Error("请先完成文件解析，再匹配标签。");
-  const eligible = tags.filter((t) => t.parentId && availableTag(tags, t));
+  const eligible = tags.filter((t) => t.parentId && aiEligibleTag(tags, t));
   // Existing bindings survive; matching only fills unbound positions.
   const result: Binding[] = v.tags.map((b) => {
     const tag = tags.find((t) => t.id === b.tagId);
@@ -103,7 +105,7 @@ export function matchingResult(v: Version, tags: Tag[]) {
           add(tag, i + 1);
       });
   }
-  return result;
+  return applyDerivedTags(result, v.tagExclusions, tags);
 }
 function matchingRecommendations(s: State, asset: State["assets"][number]) {
   return pendingRecommendationsForVersion(s, asset).flatMap((r) =>
@@ -192,7 +194,7 @@ export function startTagMatching(s: State, ids?: string[]) {
     status: "处理中",
     actorId: actor.id,
     tagIds: snapshot
-      .filter((t) => t.parentId && availableTag(snapshot, t))
+      .filter((t) => t.parentId && aiEligibleTag(snapshot, t))
       .map((t) => t.id),
     items: assets.map((a) => ({
       assetId: a.id,
@@ -275,16 +277,18 @@ export function advanceTagMatching(s: State, task: Task) {
       batch.items.some(
         (i) => !i.cancelled && !i.archived && i.v.process === "完成",
       )
-    )
-      s.notices.unshift({
-        id: uid("notice"),
-        at: now(),
+    ) {
+      const failed = task.items.filter((i) => i.status === "失败").length;
+      const total = task.items.length;
+      pushNotice(s, {
         title: "标签匹配完成，待确认结果",
-        detail: "查看每份文件的完整标签结果，确认后更新。",
+        detail: failed
+          ? `成功 ${total - failed} 份，失败 ${failed} 份，请查看原因并重试或取消。`
+          : `${total} 份内容已完成标签匹配，请核对后归档。`,
         route: `upload/${batch.id}`,
-        read: false,
         recipientId: batch.ownerId,
       });
+    }
   }
 }
 export function retryTagMatching(s: State, id: string, assetId?: string) {

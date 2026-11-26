@@ -49,6 +49,7 @@ export const referenceTaxonomy: Record<string, string[]> = {
     "产品准入",
     "疾病知识与患教",
   ],
+  用户可见范围: ["All三类用户", "已注册待认证", "已认证"],
   疾病领域: [
     "泌尿肿瘤",
     "消化肿瘤",

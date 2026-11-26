@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Search, Check, ArrowUpRight } from "lucide-react";
 import { useCMS } from "../store";
 import {
+  approvalExpiryFromNumber,
   canRole,
   credentialErrors,
   credentialLatest,
   current,
   now,
   ocrWarnings,
+  pushNotice,
   uid,
   visibleFor,
   type Approval,
@@ -106,13 +108,10 @@ export function persistApproval(
     });
   const warnings = ocrWarnings(snapshot);
   if (warnings.length)
-    state.notices.unshift({
-      id: uid("notice"),
-      at: now(),
-      read: false,
+    pushNotice(state, {
       adminOnly: true,
-      title: "审批信息已人工核对",
-      detail: `${assetIds.length} 份内容按填写信息保存，原始 OCR 结果已保留。`,
+      title: "审批信息存在 OCR 差异已人工核对",
+      detail: `审批编号 ${number}，关联 ${assetIds.length} 份内容；已按人工填写值保存，原始识别结果保留。`,
       route: `content/${assetIds[0]}?tab=approval`,
     });
   return { mode: "registered", credentialId, snapshot };
@@ -148,9 +147,14 @@ export function ApprovalForm({
   const credentials = can("edit") ? state.credentials : [];
   function change(patch: Partial<CredentialRevision>) {
     const before = latest.current.value;
+    const applied = { ...patch };
+    if (patch.number !== undefined) {
+      const derived = approvalExpiryFromNumber(patch.number);
+      if (derived) applied.expiry = derived;
+    }
     const result = {
       ...before,
-      ...patch,
+      ...applied,
       confirmed: false,
       confirmation: undefined,
       updatedAt: now(),
@@ -168,6 +172,8 @@ export function ApprovalForm({
     if (!file || inFlight.current) return;
     if (!file.type.startsWith("image/"))
       return setFileError("请选择有效的审批截图图片。");
+    if (file.size > 20 * 1024 * 1024)
+      return setFileError("请上传一张审批截图（不超过 20 MB）。");
     inFlight.current = true;
     setBusy(true);
     setFileError("");
@@ -390,6 +396,11 @@ export function ApprovalForm({
             onChange={(e) => change({ expiry: e.target.value })}
           />
         </Field>
+        {value.expiry && value.expiry === approvalExpiryFromNumber(value.number) ? (
+          <small className="muted">
+            已按编号末段年月自动填入该月最后一天；末段无法解析时需手动填写。
+          </small>
+        ) : null}
         <div
           className={`approval-shot ${errors.evidence || fileError ? "field-error" : ""}`}
         >

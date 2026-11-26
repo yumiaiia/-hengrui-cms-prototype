@@ -92,7 +92,7 @@ export interface Version {
   sourcePublished?: string;
   cover?: string;
   thumbnail?: string;
-  video?: SupplementaryVideo;
+  videos?: SupplementaryVideo[];
   summary: string;
   author?: string;
   content: string[];
@@ -165,6 +165,10 @@ export interface Tag {
   parentId: string | null;
   enabled: boolean;
   external: boolean;
+  /** 预置集合一：字典写死集合，锁定禁改/禁停用，Excel 不导出。 */
+  locked?: boolean;
+  /** 预置集合二：不参与 AI 匹配集合，仅允许人工添加。 */
+  manualOnly?: boolean;
 }
 export interface Suggestion {
   id: string;
@@ -357,15 +361,54 @@ export const now = () => new Date().toISOString();
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;
 export const current = (asset: Asset) =>
   asset.versions.find((v) => v.number === asset.current)!;
-export const dateLabel = (value: string) =>
-  new Date(value).toLocaleString("zh-CN", {
+// 同接收人下同标题、同跳转路由且未读的通知自动覆盖合并说明与时间并置顶。
+export function pushNotice(
+  s: State,
+  notice: {
+    title: string;
+    detail: string;
+    route: string;
+    recipientId?: string;
+    adminOnly?: boolean;
+  },
+) {
+  const existing = s.notices.find(
+    (n) =>
+      !n.read &&
+      n.title === notice.title &&
+      n.route === notice.route &&
+      (n.recipientId || "") === (notice.recipientId || "") &&
+      (n.adminOnly || false) === (notice.adminOnly || false),
+  );
+  if (existing) {
+    existing.detail = notice.detail;
+    existing.at = now();
+    s.notices = [existing, ...s.notices.filter((n) => n !== existing)];
+    return;
+  }
+  s.notices.unshift({
+    id: uid("notice"),
+    at: now(),
+    read: false,
+    ...notice,
+  });
+}
+export const dateLabel = (value: string) => {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai",
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  });
+  }).formatToParts(new Date(value));
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value || "";
+  const sameYear = new Date().getFullYear() === Number(get("year"));
+  const core = `${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+  return sameYear ? core : `${get("year")}-${core}`;
+};
 export const today = () =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
@@ -411,9 +454,42 @@ export function ocrWarnings(revision: CredentialRevision) {
     messages.push("多张截图识别出不同有效期，请核对截图来源");
   return messages;
 }
+export function normalizeApprovalNumber(value: string) {
+  return value.normalize("NFKC").trim();
+}
+// 双结构编号从右向左解析末段年月：结构 A 末两段 `-YYYY-MM`，结构 B 末段 `-YYMM`。
+export function approvalExpiryFromNumber(value: string): string {
+  const segments = normalizeApprovalNumber(value)
+    .split("-")
+    .filter((segment) => segment.length);
+  if (segments.length < 2) return "";
+  const last = segments[segments.length - 1];
+  const second = segments[segments.length - 2];
+  let year = 0,
+    month = 0;
+  if (/^\d{2}$/.test(last) && /^\d{4}$/.test(second)) {
+    year = Number(second);
+    month = Number(last);
+  } else if (/^\d{4}$/.test(last)) {
+    year = 2000 + Number(last.slice(0, 2));
+    month = Number(last.slice(2));
+  } else return "";
+  if (month < 1 || month > 12 || year < 2000 || year > 2999) return "";
+  const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+export function approvalNumberError(value: string): string {
+  const normalized = normalizeApprovalNumber(value);
+  if (!normalized) return "审批编号必填";
+  if (normalized.length < 8 || normalized.length > 64)
+    return "请填写 8~64 位有效审批编号";
+  if (/[\s/()]/.test(normalized))
+    return "审批编号不能包含空格、斜杠或括号";
+  return "";
+}
 export function credentialErrors(revision: CredentialRevision) {
   return [
-    !revision.number.trim() && "审批编号必填",
+    approvalNumberError(revision.number),
     revision.evidence.length !== 1 &&
       (revision.evidence.length
         ? "每次只能上传一张审批截图"

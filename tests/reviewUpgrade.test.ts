@@ -180,7 +180,9 @@ describe("待确认归档流程", () => {
     const tag = s.tags.find((t) => t.parentId)!;
     patchStaged(s, id, item.id, { tags: [{ tagId: tag.id, origin: "人工" }] });
     tag.enabled = false;
-    expect(() => confirmStaged(s, id, item.id)).toThrow("停用");
+    confirmStaged(s, id, item.id);
+    expect(archiveStaged(s, id, [item.id])).toEqual({ success: 0, failed: 1 });
+    expect(item.archiveError).toContain("停用");
     const role = s.roles.find((r) => r.id === "admin")!;
     role.permissions = role.permissions.filter((p) => p !== "upload");
     expect(() => archiveStaged(s, id, [item.id])).toThrow("权限");
@@ -212,15 +214,15 @@ describe("待确认归档流程", () => {
     };
     inputs[0].v.cover = "/samples/cover-1.svg";
     inputs[0].v.thumbnail = "/samples/cover-2.svg";
-    inputs[0].v.video = video;
+    inputs[0].v.videos = [video];
     const id = startUploadBatch(s, inputs, { mode: "exempt" });
     expect(() =>
       patchStaged(s, id, "one", { summary: "处理中不能修改" }),
     ).toThrow("正在解析");
     advanceUploads(s, Date.now() + 60000);
     const [one, two] = s.uploadBatches![0].items;
-    expect(one.v.video).toEqual(video);
-    expect(two.v.video).toBeUndefined();
+    expect(one.v.videos).toEqual([video]);
+    expect(two.v.videos).toBeUndefined();
     patchStaged(s, id, one.id, {}, { noApplicableTags: true });
     confirmStaged(s, id, one.id);
     patchStaged(s, id, one.id, { thumbnail: "/samples/cover-3.svg" });
@@ -228,11 +230,11 @@ describe("待确认归档流程", () => {
     confirmStaged(s, id, one.id);
     expect(archiveStaged(s, id, [one.id])).toEqual({ success: 1, failed: 0 });
     const v = current(s.assets.find((a) => a.id === one.archived!.assetId)!);
-    expect(v.video).toEqual(video);
+    expect(v.videos).toEqual([video]);
     expect(v.cover).toBe("/samples/cover-1.svg");
     expect(v.thumbnail).toBe("/samples/cover-3.svg");
-    one.v.video!.fileName = "后来修改.webm";
-    expect(v.video!.fileName).toBe("讲解.webm");
+    one.v.videos![0].fileName = "后来修改.webm";
+    expect(v.videos![0].fileName).toBe("讲解.webm");
   });
   it("确认前已显示新版本继承的封面，明确清除后归档不再隐式恢复", () => {
     const s = setup(),
@@ -240,6 +242,9 @@ describe("待确认归档流程", () => {
       old = current(asset);
     old.cover = "/samples/cover-1.svg";
     old.thumbnail = "/samples/cover-2.svg";
+    old.videos = [
+      { fileKey: "old-video", fileName: "旧视频.mp4", size: 10, type: "video/mp4" },
+    ];
     const upload = input(s);
     upload.v.cover = undefined;
     upload.v.thumbnail = undefined;
@@ -253,12 +258,14 @@ describe("待确认归档流程", () => {
       item = s.uploadBatches![0].items[0];
     expect(item.v.cover).toBe(old.cover);
     expect(item.v.thumbnail).toBe(old.thumbnail);
+    expect(item.v.videos).toEqual(old.videos);
     advanceUploads(s, Date.now() + 60000);
     patchStaged(s, id, item.id, { cover: "" }, { noApplicableTags: true });
     confirmStaged(s, id, item.id);
     archiveStaged(s, id, [item.id]);
     expect(current(asset).cover).toBe("");
     expect(current(asset).thumbnail).toBe("/samples/cover-2.svg");
+    expect(current(asset).videos).toEqual(old.videos);
   });
   it("单项素材不可用不归档，重试不要求重新确认", () => {
     const s = setup(),

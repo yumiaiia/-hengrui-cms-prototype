@@ -3,7 +3,6 @@ import { useState, type FormEvent } from "react";
 import { Button, Field } from "../components/ui";
 import { go, type User } from "../model";
 import { useCMS } from "../store";
-import { findUserByEmployeeId } from "../userIdentity";
 import "./admin.css";
 
 const demoRoles = [
@@ -29,108 +28,100 @@ export default function Login() {
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const selectedUser = findUserByEmployeeId(state.users, employeeId);
-
-  function roleUser(roleId: string, preferredEmployeeId: string) {
-    if (!state.roles.some((role) => role.id === roleId)) return undefined;
-    return (
-      state.users.find(
-        (user) =>
-          user.enabled !== false &&
-          user.employeeId === preferredEmployeeId &&
-          user.roleId === roleId,
-      ) ||
-      state.users.find(
-        (user) =>
-          user.enabled !== false && !!user.employeeId && user.roleId === roleId,
-      )
-    );
-  }
 
   function chooseUser(user: User) {
     setEmployeeId(user.employeeId || "");
     setError("");
   }
 
-  function login(user: User | undefined, method: "account" | "sso") {
+  function login(user: User | undefined) {
     if (busy) return;
-    if (
-      !user ||
-      !user.employeeId ||
-      findUserByEmployeeId(state.users, user.employeeId)?.id !== user.id
-    )
-      return setError("请选择已启用且已填写工号的账号。");
-    const assignedRole = state.roles.find((role) => role.id === user.roleId);
+    const id = (user?.employeeId || employeeId || "").trim();
+    if (!id || !/^\d{1,64}$/.test(id))
+      return setError("企业微信登录凭证已过期或无效，请重新发起登录。");
+    const matches = state.users.filter((u) => (u.employeeId || "").trim() === id);
+    if (!matches.length)
+      return setError("未匹配到关联该工号的系统账号，请联系管理员。");
+    const target = matches.find((u) => u.id === user?.id) || matches[0];
+    if (target.enabled === false)
+      return setError("当前工号对应账号已停用。");
+    const assignedRole = state.roles.find((role) => role.id === target.roleId);
     if (!assignedRole)
-      return setError("该账号未关联有效角色，请让演示管理员修复角色配置。");
+      return setError("当前账号未配置有效角色，请联系管理员。");
+    if (!assignedRole.menus.length)
+      return setError("当前账号未配置菜单权限，请联系管理员。");
     setBusy(true);
     const saved = update((draft) => {
-      draft.userId = user.id;
+      draft.userId = target.id;
     });
     setBusy(false);
     if (saved) {
-      toast(`已切换为 ${user.name} 的本地演示身份。`);
+      toast(`已通过企业微信登录为 ${target.name}。`);
       go(
         assignedRole.menus.includes("workbench")
           ? "workbench"
           : assignedRole.menus[0] || "workbench",
       );
-    } else setError("演示身份未保存。请检查浏览器存储空间后重试。");
+    } else setError("登录会话未保存，请检查浏览器存储空间后重试。");
   }
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    login(findUserByEmployeeId(state.users, employeeId), "account");
+    login(state.users.find((u) => (u.employeeId || "") === employeeId));
   }
 
-  const ssoUser = roleUser("operator", "000003");
   return (
     <main className="cms-login cms-login-simple">
       <section className="cms-login-entry" aria-labelledby="cms-login-title">
         <div className="cms-login-form-wrap">
           <h1 id="cms-login-title">恒瑞 CMS</h1>
+          <p className="cms-login-sso-hint">
+            本系统仅支持企业微信单点登录，授权后将按工号自动匹配账号。
+          </p>
           <form onSubmit={submit} className="cms-login-form">
-            <Field label="工号" required error={error || undefined}>
+            <Field label="企微工号（演示）" error={error || undefined}>
               <select
-                aria-label="登录工号"
-                value={selectedUser?.id || ""}
+                aria-label="模拟企微回调工号"
+                value={employeeId}
                 onChange={(event) => {
                   const user = state.users.find(
-                    (u) => u.id === event.target.value,
+                    (u) => u.employeeId === event.target.value,
                   );
                   if (user) chooseUser(user);
+                  else setEmployeeId(event.target.value);
                 }}
               >
-                <option value="" disabled>
-                  请选择工号
-                </option>
-                {state.users
-                  .filter((u) => u.enabled !== false)
-                  .map((u) => (
-                    <option key={u.id} value={u.id} disabled={!u.employeeId}>
-                      {u.name} · {u.employeeId || "待补充工号"}
-                    </option>
-                  ))}
+                {state.users.map((u) => (
+                  <option key={u.id} value={u.employeeId || ""}>
+                    {u.name} · {u.employeeId || "待补充工号"}
+                    {u.enabled === false ? "（已停用）" : ""}
+                  </option>
+                ))}
               </select>
             </Field>
             <Button
               variant="primary"
               type="submit"
-              disabled={busy || !selectedUser}
+              disabled={busy}
               className="cms-login-submit"
             >
-              {busy ? "登录中…" : "登录"}
+              {busy ? "正在通过企业微信授权…" : "企业微信登录"}
             </Button>
           </form>
           <div className="cms-login-quick">
             <div>
               {demoRoles.map((item) => {
-                const user = roleUser(item.roleId, item.employeeId);
+                const user = state.users.find(
+                  (u) =>
+                    u.enabled !== false &&
+                    u.employeeId === item.employeeId &&
+                    u.roleId === item.roleId,
+                );
                 return (
                   <button
                     key={item.roleId}
+                    type="button"
                     disabled={!user || busy}
-                    aria-pressed={!!user && selectedUser?.id === user.id}
                     onClick={() => {
                       if (user) chooseUser(user);
                     }}
@@ -140,16 +131,17 @@ export default function Login() {
                 );
               })}
             </div>
+            <button
+              type="button"
+              className="text-link"
+              disabled={busy}
+              onClick={() =>
+                setError("企业微信登录凭证已过期或无效，请重新发起登录。")
+              }
+            >
+              模拟凭证过期
+            </button>
           </div>
-          <Button
-            className="cms-login-sso"
-            disabled={busy || !ssoUser}
-            onClick={() => {
-              if (ssoUser) login(ssoUser, "sso");
-            }}
-          >
-            企微登录（演示）
-          </Button>
         </div>
       </section>
     </main>

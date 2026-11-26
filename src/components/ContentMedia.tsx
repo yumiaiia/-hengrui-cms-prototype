@@ -6,7 +6,7 @@ import { AssetImage, Button, CoverPicker, Field } from "./ui";
 
 export type ContentMetadata = Pick<
   Version,
-  "title" | "summary" | "cover" | "thumbnail" | "video"
+  "title" | "summary" | "cover" | "thumbnail" | "videos"
 >;
 export const mediaSize = (bytes: number) =>
   bytes < 1048576
@@ -69,8 +69,9 @@ export function VideoPreview({ video }: { video: SupplementaryVideo }) {
 export function ContentMedia({
   value,
 }: {
-  value: Pick<Version, "cover" | "thumbnail" | "video">;
+  value: Pick<Version, "cover" | "thumbnail" | "videos">;
 }) {
+  const videos = value.videos || [];
   return (
     <div className="content-media-grid">
       <MediaImage label="封面" value={value.cover} />
@@ -78,10 +79,12 @@ export function ContentMedia({
       <section className="content-media-card content-media-video">
         <h4>
           <Film size={15} />
-          补充视频
+          补充视频 {videos.length ? `${videos.length}/3` : ""}
         </h4>
-        {value.video ? (
-          <VideoPreview video={value.video} />
+        {videos.length ? (
+          videos.map((video) => (
+            <VideoPreview key={video.fileKey} video={video} />
+          ))
         ) : (
           <div className="media-placeholder">
             <Film size={25} />
@@ -114,24 +117,25 @@ function MediaImage({ label, value }: { label: string; value?: string }) {
     </section>
   );
 }
-export function ContentMetadataForm({
-  value,
+export function VideoListEditor({
+  videos,
   onChange,
   onBusyChange,
+  compact = false,
 }: {
-  value: ContentMetadata;
-  onChange: (patch: Partial<ContentMetadata>) => void;
+  videos?: SupplementaryVideo[];
+  onChange: (videos: SupplementaryVideo[] | undefined) => void;
   onBusyChange?: (busy: boolean) => void;
+  compact?: boolean;
 }) {
   const [videoBusy, setVideoBusy] = useState(false),
     [error, setError] = useState("");
-  const mediaBusy = useRef(new Set<string>()),
-    videoLock = useRef(false);
+  const videoLock = useRef(false);
   const input = useRef<HTMLInputElement>(null);
-  function setMediaBusy(key: string, busy: boolean) {
-    if (busy) mediaBusy.current.add(key);
-    else mediaBusy.current.delete(key);
-    onBusyChange?.(mediaBusy.current.size > 0);
+  const replaceIndex = useRef<number | null>(null);
+  const list = videos || [];
+  function commit(next: SupplementaryVideo[]) {
+    onChange(next.length ? next : undefined);
   }
   async function uploadVideo(file?: File) {
     if (!file || videoLock.current) return;
@@ -143,28 +147,149 @@ export function ContentMetadataForm({
       setError("请选择非空的 MP4、WebM 或 MOV 视频文件。");
       return;
     }
+    if (file.size > 1024 * 1024 * 1024) {
+      setError("单个补充视频不能超过 1 GB。");
+      return;
+    }
+    if (replaceIndex.current === null && list.length >= 3) {
+      setError("最多上传 3 个补充视频。");
+      return;
+    }
     videoLock.current = true;
     setVideoBusy(true);
-    setMediaBusy("video", true);
+    onBusyChange?.(true);
     try {
       const fileKey = uid("video");
       await putFiles([{ key: fileKey, blob: file }]);
-      onChange({
-        video: {
-          fileKey,
-          fileName: file.name,
-          size: file.size,
-          type: file.type || "video/mp4",
-        },
-      });
+      const item: SupplementaryVideo = {
+        fileKey,
+        fileName: file.name,
+        size: file.size,
+        type: file.type || "video/mp4",
+      };
+      const index = replaceIndex.current;
+      commit(
+        index === null
+          ? [...list, item]
+          : list.map((v) => (v.fileKey === list[index].fileKey ? item : v)),
+      );
     } catch {
       setError("视频未保存，请检查浏览器存储后重试。");
     } finally {
+      replaceIndex.current = null;
       videoLock.current = false;
       setVideoBusy(false);
-      setMediaBusy("video", false);
+      onBusyChange?.(false);
       if (input.current) input.current.value = "";
     }
+  }
+  function pick(index: number | null) {
+    replaceIndex.current = index;
+    input.current?.click();
+  }
+  return (
+    <section
+      className="metadata-video-editor"
+      data-media-busy={videoBusy || undefined}
+    >
+      {!compact ? (
+        <>
+          <div className="metadata-video-heading">
+            <h3>
+              补充视频<small>选填</small>
+            </h3>
+            <span>共 {list.length}/3 · 仅关联当前文件</span>
+          </div>
+          <p>可补充讲解或演示视频，与源文件分别保存。支持 MP4、WebM、MOV。</p>
+        </>
+      ) : (
+        <div className="metadata-video-heading">
+          <h3>
+            补充视频<small>选填</small>
+          </h3>
+          <span>共 {list.length}/3</span>
+        </div>
+      )}
+      {list.length ? (
+        list.map((video, index) => (
+          <div className="metadata-video-item" key={video.fileKey}>
+            <VideoPreview video={video} />
+            <div className="actions">
+              <Button
+                type="button"
+                disabled={videoBusy}
+                onClick={() => pick(index)}
+              >
+                更换
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={videoBusy}
+                icon={<X size={14} />}
+                onClick={() => commit(list.filter((v) => v !== video))}
+              >
+                移除
+              </Button>
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="media-placeholder">
+          <Film size={28} />
+          <span>为这份内容添加视频（最多 3 个）</span>
+        </div>
+      )}
+      <input
+        hidden
+        ref={input}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+        aria-label="上传补充视频"
+        disabled={videoBusy}
+        onChange={(e) => void uploadVideo(e.target.files?.[0])}
+      />
+      <div className="actions">
+        <Button
+          type="button"
+          disabled={videoBusy || list.length >= 3}
+          icon={
+            videoBusy ? (
+              <Loader2 size={15} className="spin" />
+            ) : (
+              <Upload size={15} />
+            )
+          }
+          onClick={() => pick(null)}
+        >
+          {videoBusy ? "正在保存视频…" : "上传补充视频"}
+        </Button>
+        {list.length >= 3 ? (
+          <small className="muted">最多上传 3 个补充视频</small>
+        ) : null}
+      </div>
+      {error ? (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+export function ContentMetadataForm({
+  value,
+  onChange,
+  onBusyChange,
+}: {
+  value: ContentMetadata;
+  onChange: (patch: Partial<ContentMetadata>) => void;
+  onBusyChange?: (busy: boolean) => void;
+}) {
+  const mediaBusy = useRef(new Set<string>());
+  function setMediaBusy(key: string, busy: boolean) {
+    if (busy) mediaBusy.current.add(key);
+    else mediaBusy.current.delete(key);
+    onBusyChange?.(mediaBusy.current.size > 0);
   }
   return (
     <div className="content-metadata-form">
@@ -199,74 +324,11 @@ export function ContentMetadataForm({
           </section>
         ))}
       </div>
-      <section
-        className="metadata-video-editor"
-        data-media-busy={videoBusy || undefined}
-      >
-        <div className="metadata-video-heading">
-          <h3>
-            补充视频<small>选填</small>
-          </h3>
-          <span>仅关联当前文件</span>
-        </div>
-        <p>可补充讲解或演示视频，与源文件分别保存。支持 MP4、WebM、MOV。</p>
-        {value.video ? (
-          <VideoPreview video={value.video} />
-        ) : (
-          <div className="media-placeholder">
-            <Film size={28} />
-            <span>为这份内容添加一个视频</span>
-          </div>
-        )}
-        <input
-          hidden
-          ref={input}
-          type="file"
-          accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
-          aria-label="上传补充视频"
-          disabled={videoBusy}
-          onChange={(e) => void uploadVideo(e.target.files?.[0])}
-        />
-        <div className="actions">
-          <Button
-            type="button"
-            disabled={videoBusy}
-            icon={
-              videoBusy ? (
-                <Loader2 size={15} className="spin" />
-              ) : (
-                <Upload size={15} />
-              )
-            }
-            onClick={() => input.current?.click()}
-          >
-            {videoBusy
-              ? "正在保存视频…"
-              : value.video
-                ? "更换补充视频"
-                : "上传补充视频"}
-          </Button>
-          {value.video ? (
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={videoBusy}
-              icon={<X size={14} />}
-              onClick={() => {
-                onChange({ video: undefined });
-                setError("");
-              }}
-            >
-              移除视频
-            </Button>
-          ) : null}
-        </div>
-        {error ? (
-          <p className="error-text" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </section>
+      <VideoListEditor
+        videos={value.videos}
+        onChange={(videos) => onChange({ videos })}
+        onBusyChange={(busy) => setMediaBusy("videos", busy)}
+      />
     </div>
   );
 }

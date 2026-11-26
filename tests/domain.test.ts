@@ -9,6 +9,8 @@ import {
   primaryTagId,
   type Version,
   type State,
+  approvalExpiryFromNumber,
+  approvalNumberError,
 } from "../src/model";
 import { demoCredential, seedState } from "../src/seed";
 import { csvCell } from "../src/storage";
@@ -315,5 +317,27 @@ describe("权限和导出", () => {
   it("导出CSV转义公式和引号", () => {
     expect(csvCell("=SUM(A1)")).toBe('"\'=SUM(A1)"');
     expect(csvCell('a"b')).toBe('"a""b"');
+  });
+});
+describe("审批编号解析", () => {
+  it("双结构末段年月推导月末有效期", () => {
+    expect(approvalExpiryFromNumber("TG-非肿瘤-减重瑞普泊肽注射液-02893-2028-10")).toBe(
+      "2028-10-31",
+    );
+    expect(approvalExpiryFromNumber("HR-P-108051-00001-2607")).toBe("2026-07-31");
+    expect(approvalExpiryFromNumber("APP-DEMO-001-2028-02")).toBe("2028-02-29");
+    expect(approvalExpiryFromNumber("全角编号－2027-01")).toBe("2027-01-31");
+  });
+  it("末段无法解析合法年月时返回空", () => {
+    expect(approvalExpiryFromNumber("APP-DEMO-001")).toBe("");
+    expect(approvalExpiryFromNumber("HR-P-00001-2613")).toBe("");
+    expect(approvalExpiryFromNumber("")).toBe("");
+  });
+  it("编号格式校验", () => {
+    expect(approvalNumberError("")).toBe("审批编号必填");
+    expect(approvalNumberError("AB-123")).toBe("请填写 8~64 位有效审批编号");
+    expect(approvalNumberError("HR-P/108051-00001-2607")).toContain("斜杠");
+    expect(approvalNumberError("HR-P（108051）-00001")).toContain("括号");
+    expect(approvalNumberError("TG-非肿瘤-减重瑞普泊肽注射液-02893-2028-10")).toBe("");
   });
 });

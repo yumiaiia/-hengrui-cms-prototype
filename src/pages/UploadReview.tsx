@@ -171,7 +171,8 @@ export default function UploadReview({ id }: { id: string }) {
         try {
           if (i.v.fileKey || i.v.fileUrl)
             await loadBlob(i.v.fileKey, i.v.fileUrl);
-          if (i.v.video) await loadBlob(i.v.video.fileKey);
+          for (const video of i.v.videos || [])
+            await loadBlob(video.fileKey);
           for (const e of i.v.approval.snapshot?.evidence || [])
             await loadBlob(e.fileKey, e.url);
         } catch {
@@ -325,7 +326,7 @@ export default function UploadReview({ id }: { id: string }) {
                 <div>
                   <strong>{i.v.title}</strong>
                   <small>{i.v.fileName}</small>
-                  {i.v.cover || i.v.thumbnail || i.v.video ? (
+                  {i.v.cover || i.v.thumbnail || i.v.videos?.length ? (
                     <span className="confirmation-file-media">
                       {i.v.cover ? (
                         <span>
@@ -339,7 +340,7 @@ export default function UploadReview({ id }: { id: string }) {
                           缩略图
                         </span>
                       ) : null}
-                      {i.v.video ? (
+                      {i.v.videos?.length ? (
                         <span>
                           <Film size={10} />
                           视频
@@ -467,26 +468,27 @@ function ReviewFile({
   const pending = activeItem(item) && processing(item),
     archived = !!item.archived,
     isConfirmed = confirmed(item, state),
+    failed =
+      item.v.process === "失败" ||
+      item.v.process === "部分失败" ||
+      item.v.tagStatus === "失败" ||
+      Object.values(item.v.pageStates || {}).some((p) => p.status === "失败"),
     locked =
       disabled ||
       pending ||
       archived ||
       !!item.cancelled ||
-      item.v.process !== "完成";
+      item.v.process !== "完成",
+    confirmDisabled = disabled || archived || !!item.cancelled || pending || failed;
   const batch = state.uploadBatches!.find((b) => b.id === batchId)!;
   const problems = reviewProblems(state, item, batch),
     target = state.assets.find((a) => a.id === item.targetId);
-  const failed =
-    item.v.process === "失败" ||
-    item.v.process === "部分失败" ||
-    item.v.tagStatus === "失败" ||
-    Object.values(item.v.pageStates || {}).some((p) => p.status === "失败");
-  function run(recipe: (s: State) => void, action: string, detail = "") {
+  function run(recipe: (s: State) => void, action?: string, detail = "") {
     setError("");
     try {
       const saved = update(
         recipe,
-        { action, object: item.v.title, batchId, detail },
+        action ? { action, object: item.v.title, batchId, detail } : undefined,
         tagsOnly ? "taxonomy" : "upload",
       );
       if (!saved) setError("修改未保存，请检查权限或浏览器存储后重试。");
@@ -540,11 +542,11 @@ function ReviewFile({
       {item.targetId &&
       activeItem(item) &&
       (target?.current !== item.baseVersion ||
-        (tagsOnly && problems.some((p) => /已变化|已更新/.test(p)))) ? (
+        (tagsOnly && problems.some((p) => /已变化/.test(p)))) ? (
         <div className="confirmation-alert">
           <strong>
             {tagsOnly
-              ? "内容或标签库已变化，请重新同步本文件。"
+              ? "内容已变化，请重新同步本文件。"
               : "当前正式版本已变化，请核对本次更新目标。"}
           </strong>
           <Button
@@ -601,7 +603,9 @@ function ReviewFile({
                     summary: item.v.summary,
                     cover: item.v.cover,
                     thumbnail: item.v.thumbnail,
-                    video: item.v.video,
+                    videos: item.v.videos
+                      ? structuredClone(item.v.videos)
+                      : undefined,
                   });
                   setError("");
                 }}
@@ -706,7 +710,7 @@ function ReviewFile({
       ) : null}
       {!pending && activeItem(item) && problems.length ? (
         <div className="confirmation-validation">
-          <strong>确认前还需处理</strong>
+          <strong>归档提交前需处理</strong>
           <ul>
             {problems.map((p) => (
               <li key={p}>{p}</li>
@@ -784,14 +788,9 @@ function ReviewFile({
           ) : (
             <Button
               variant="primary"
-              disabled={locked || !!problems.length}
+              disabled={confirmDisabled}
               onClick={() => {
-                if (
-                  run(
-                    (s) => confirmStaged(s, batchId, item.id),
-                    tagsOnly ? "确认标签更新结果" : "确认内容与标签结果",
-                  )
-                ) {
+                if (run((s) => confirmStaged(s, batchId, item.id))) {
                   toast("本文件已确认。");
                   onConfirmed();
                 }

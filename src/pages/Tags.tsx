@@ -143,6 +143,8 @@ export default function Tags() {
       parentId: draft.parentId,
       enabled: draft.enabled,
       external: draft.external,
+      locked: editor.locked,
+      manualOnly: editor.manualOnly,
     };
     try {
       const ok = update(
@@ -150,6 +152,8 @@ export default function Tags() {
           const validation = validateTag(s.tags, tag);
           if (validation) throw new Error(validation);
           const previous = s.tags.find((item) => item.id === tag.id);
+          if (previous?.locked)
+            throw new Error("系统预置标签为字典写死集合，不可编辑或停用。");
           if (
             !previous ||
             previous.name !== tag.name ||
@@ -290,38 +294,57 @@ export default function Tags() {
               >
                 新增标签分类
               </Button>
-              {matchingRoots.map((root) => (
-                <div
-                  key={root.id}
-                  className={`primary-row ${selected?.id === root.id ? "active" : ""}`}
-                >
-                  <button
-                    type="button"
-                    aria-pressed={selected?.id === root.id}
-                    onClick={() => setPrimaryId(root.id)}
+              {matchingRoots.map((root) => {
+                const children = state.tags.filter(
+                  (tag) => tag.parentId === root.id,
+                );
+                return (
+                  <div
+                    key={root.id}
+                    className={`primary-row ${selected?.id === root.id ? "active" : ""}`}
                   >
-                    <strong>{root.name}</strong>
-                    <span>
-                      {
-                        state.tags.filter((tag) => tag.parentId === root.id)
-                          .length
-                      }{" "}
-                      个标签
-                    </span>
-                    {!root.enabled ? <Badge>已停用</Badge> : null}
-                  </button>
-                  {selected?.id === root.id ? (
-                    <Button
-                      variant="ghost"
-                      aria-label={`编辑标签分类 ${root.name}`}
-                      title="编辑标签分类"
-                      disabled={!can("taxonomy")}
-                      icon={<Pencil size={16} />}
-                      onClick={() => openEditor(root)}
-                    />
-                  ) : null}
-                </div>
-              ))}
+                    <button
+                      type="button"
+                      aria-pressed={selected?.id === root.id}
+                      onClick={() => setPrimaryId(root.id)}
+                    >
+                      <strong>
+                        {root.name}
+                        {children.some((tag) => tag.locked) ? (
+                          <i className="primary-preset-mark" title="含系统预置标签">
+                            系统预置
+                          </i>
+                        ) : null}
+                        {children.some((tag) => tag.manualOnly) ? (
+                          <i
+                            className="primary-manual-mark"
+                            title="含仅人工标注标签"
+                          >
+                            仅人工标注
+                          </i>
+                        ) : null}
+                      </strong>
+                      <span>
+                        {children.length} 个标签
+                        {children.some((tag) => tag.locked)
+                          ? ` · 预置 ${children.filter((tag) => tag.locked).length}`
+                          : ""}
+                      </span>
+                      {!root.enabled ? <Badge>已停用</Badge> : null}
+                    </button>
+                    {selected?.id === root.id ? (
+                      <Button
+                        variant="ghost"
+                        aria-label={`编辑标签分类 ${root.name}`}
+                        title="编辑标签分类"
+                        disabled={!can("taxonomy")}
+                        icon={<Pencil size={16} />}
+                        onClick={() => openEditor(root)}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
               {!matchingRoots.length ? (
                 <Empty
                   title={query ? "没有匹配标签" : "暂无标签分类"}
@@ -361,30 +384,42 @@ export default function Tags() {
                           {!tag.enabled ? "已停用" : "标签分类已停用"}
                         </Badge>
                       ) : null}
+                      {tag.locked ? (
+                        <Badge tone="gray">系统预置</Badge>
+                      ) : null}
+                      {tag.manualOnly ? (
+                        <Badge tone="blue">仅人工标注</Badge>
+                      ) : null}
                       {tag.external ? <span>对外展示</span> : null}
                     </div>
                     <div className="actions">
-                      <Button
-                        variant="ghost"
-                        aria-label={`${tag.enabled ? "停用" : "启用"}标签 ${tag.name}`}
-                        disabled={!can("taxonomy")}
-                        onClick={() => {
-                          openEditor(tag);
-                          if (can("taxonomy"))
-                            setEditor({ ...tag, enabled: !tag.enabled });
-                        }}
-                      >
-                        {tag.enabled ? "停用" : "启用"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={!can("taxonomy")}
-                        icon={<Pencil size={14} />}
-                        aria-label={`编辑标签 ${tag.name}`}
-                        onClick={() => openEditor(tag)}
-                      >
-                        编辑
-                      </Button>
+                      {tag.locked ? (
+                        <small className="muted">系统预置标签不可编辑或停用</small>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            aria-label={`${tag.enabled ? "停用" : "启用"}标签 ${tag.name}`}
+                            disabled={!can("taxonomy")}
+                            onClick={() => {
+                              openEditor(tag);
+                              if (can("taxonomy"))
+                                setEditor({ ...tag, enabled: !tag.enabled });
+                            }}
+                          >
+                            {tag.enabled ? "停用" : "启用"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            disabled={!can("taxonomy")}
+                            icon={<Pencil size={14} />}
+                            aria-label={`编辑标签 ${tag.name}`}
+                            onClick={() => openEditor(tag)}
+                          >
+                            编辑
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </article>
                 ))}

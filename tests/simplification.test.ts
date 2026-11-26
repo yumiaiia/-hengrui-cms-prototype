@@ -273,7 +273,8 @@ describe("标签 Excel 交换", () => {
       );
     const preview = previewTagImport(s, rows);
     expect(preview.rows.some((r) => r.error)).toBe(false);
-    expect(preview.unchanged).toBe(s.tags.length);
+    // 写死集合不导出，故仅统计可编辑标签。
+    expect(preview.unchanged).toBe(s.tags.filter((t) => !t.locked).length);
     expect(preview.updated + preview.added).toBe(0);
     const assets = structuredClone(s.assets);
     applyTagImport(s, preview);

@@ -432,6 +432,12 @@
   width: 100%;
   max-width: 420px;
 }
+.cms-login-sso-hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--login-slate);
+}
 .cms-login-demo-label {
   display: inline-flex;
   align-items: center;

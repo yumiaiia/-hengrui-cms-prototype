@@ -1,6 +1,6 @@
 import { availableTag } from "../taxonomy";
 import { bindingName } from "../tagResults";
-import { ContentMedia } from "../components/ContentMedia";
+import { ContentMedia, VideoListEditor } from "../components/ContentMedia";
 import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { useEffect, useState } from "react";
 import {
@@ -23,6 +23,7 @@ import {
   ocrWarnings,
   now,
   go,
+  type SupplementaryVideo,
 } from "../model";
 import { loadBlob, download } from "../storage";
 import {
@@ -60,8 +61,9 @@ export default function ContentDetail({ id }: { id: string }) {
   const [summary, setSummary] = useState("");
   const [cover, setCover] = useState("");
   const [thumbnail, setThumbnail] = useState("");
+  const [videos, setVideos] = useState<SupplementaryVideo[]>();
+  const [mediaBusy, setMediaBusy] = useState(false);
   const [expiry, setExpiry] = useState("");
-  const [reason, setReason] = useState("");
   const v =
     asset?.versions.find((v) => v.number === number) ||
     (asset ? current(asset) : undefined);
@@ -118,6 +120,7 @@ export default function ContentDetail({ id }: { id: string }) {
     setSummary(v!.summary);
     setCover(v!.cover || "");
     setThumbnail(v!.thumbnail || "");
+    setVideos(v!.videos ? structuredClone(v!.videos) : undefined);
     setExpiry(v!.expiry || "");
     setModal("edit");
   }
@@ -131,6 +134,7 @@ export default function ContentDetail({ id }: { id: string }) {
         target.summary = summary;
         target.cover = cover;
         target.thumbnail = thumbnail;
+        target.videos = videos;
         if (target.approval.mode === "exempt") target.expiry = expiry;
         a.updatedAt = now();
       },
@@ -505,8 +509,12 @@ export default function ContentDetail({ id }: { id: string }) {
           footer={
             <>
               <Button onClick={() => setModal("")}>取消</Button>
-              <Button variant="primary" onClick={saveMeta}>
-                保存信息
+              <Button
+                variant="primary"
+                disabled={mediaBusy}
+                onClick={saveMeta}
+              >
+                {mediaBusy ? "素材保存中…" : "保存信息"}
               </Button>
             </>
           }
@@ -540,6 +548,12 @@ export default function ContentDetail({ id }: { id: string }) {
               label="上传缩略图"
             />
           </Field>
+          <VideoListEditor
+            videos={videos}
+            onChange={setVideos}
+            compact
+            onBusyChange={setMediaBusy}
+          />
         </Dialog>
       ) : null}
       {modal === "evidence" && can("evidence") && shot ? (
@@ -569,15 +583,13 @@ export default function ContentDetail({ id }: { id: string }) {
               <Button
                 variant="danger"
                 onClick={() => {
-                  if (!reason.trim()) return toast("请填写作废原因");
                   update(
                     (s) => {
                       const a = s.assets.find((a) => a.id === id)!;
                       a.lifecycle = "已作废";
-                      a.voidReason = reason;
                       a.updatedAt = now();
                     },
-                    { action: "作废内容", object: asset.code, detail: reason },
+                    { action: "作废内容", object: asset.code },
                     "void",
                   );
                   setModal("");
@@ -589,15 +601,8 @@ export default function ContentDetail({ id }: { id: string }) {
           }
         >
           <p className="dialog-intro">
-            内容不再出现在正常列表中，历史版本仍可查看。
+            内容作废后将不再出现在正常列表中，历史版本仍可查看，作废后不可恢复。
           </p>
-          <Field label="作废原因" required>
-            <textarea
-              rows={3}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
         </Dialog>
       ) : null}
     </div>

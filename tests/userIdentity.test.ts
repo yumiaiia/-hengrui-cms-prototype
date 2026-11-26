@@ -38,7 +38,7 @@ describe("工号映射", () => {
     expect(s).toEqual(before);
   });
 
-  it.each(["", "   ", "name@example.com", "AB 123", "a".repeat(65)])(
+  it.each(["", "   ", "name@example.com", "AB 123", "ABC123", "a".repeat(65)])(
     "不接受无效工号 %j",
     (employeeId) => {
       const s = setup();
@@ -108,13 +108,13 @@ describe("工号迁移", () => {
     saveManagedUser(migrated, {
       id: "legacy",
       name: "旧员工",
-      employeeId: "HR0099",
+      employeeId: "0099",
       roleId: "operator",
     });
     expect(migrated.users.at(-1)).toMatchObject({
       id: "legacy",
       account: "real@example.com",
-      employeeId: "HR0099",
+      employeeId: "0099",
       enabled: false,
     });
     expect(migrated.assets[0].ownerId).toBe("legacy");

@@ -19,8 +19,9 @@ export function collectedArticles(articles: Article[], assets: Asset[]) {
   return articles.filter(
     (article) =>
       article.status !== "失败" &&
-      (!article.assetId || byId.has(article.assetId)) &&
-      !!collectedBody(article, byId.get(article.assetId || "")),
+      !!article.assetId &&
+      byId.has(article.assetId) &&
+      !!collectedBody(article, byId.get(article.assetId)),
   );
 }
 

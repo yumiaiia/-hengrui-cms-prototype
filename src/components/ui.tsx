@@ -396,6 +396,8 @@ export function CoverPicker({
   async function upload(file: File | undefined) {
     if (!file) return;
     if (!file.type.startsWith("image/")) return toast("请选择有效的图片文件。");
+    if (file.size > 10 * 1024 * 1024)
+      return toast("请选择不超过 10 MB 的有效图片。");
     setBusy(true);
     onBusyChange?.(true);
     try {

@@ -270,7 +270,7 @@ export function CMSProvider({ children }: { children: ReactNode }) {
           }
       },
       {
-        action: "重试失败任务",
+        action: "重试解析任务",
         object: t.name,
         detail: "仅重新执行失败项，成功项保留。",
       },

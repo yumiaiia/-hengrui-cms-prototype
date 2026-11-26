@@ -87,13 +87,11 @@ export function ExportDialog({
           sourcePublished: v.sourcePublished,
           summary: v.summary,
           author: v.author,
-          video: v.video
-            ? {
-                fileName: v.video.fileName,
-                size: v.video.size,
-                type: v.video.type,
-              }
-            : undefined,
+          videos: v.videos?.map((video) => ({
+            fileName: video.fileName,
+            size: video.size,
+            type: video.type,
+          })),
           createdAt: v.createdAt,
           expiry: v.approval.snapshot?.expiry || v.expiry,
           approval: {
@@ -136,11 +134,12 @@ export function ExportDialog({
               await image.arrayBuffer(),
             );
           }
-        if (v.video)
-          files[folder + "media/video/" + clean(v.video.fileName)] =
-            new Uint8Array(
-              await (await loadBlob(v.video.fileKey)).arrayBuffer(),
-            );
+        for (const [index, video] of (v.videos || []).entries())
+          files[
+            folder + `media/video/${index + 1}-${clean(video.fileName)}`
+          ] = new Uint8Array(
+            await (await loadBlob(video.fileKey)).arrayBuffer(),
+          );
         if (evidence && can("evidence"))
           for (const [i, image] of images.entries()) {
             files[
@@ -178,11 +177,7 @@ export function ExportDialog({
           t.artifactKey = artifactKey;
           t.artifactName = artifactName;
         },
-        {
-          action: "导出内容资产",
-          object: `${assets.length} 份内容`,
-          detail: evidence ? "按权限包含审批截图。" : "不包含审批截图。",
-        },
+        undefined,
         "export",
       );
       notify({
@@ -197,6 +192,11 @@ export function ExportDialog({
     } catch (e) {
       const reason = e instanceof Error ? e.message : "文件包生成失败";
       setError(reason);
+      notify({
+        title: "内容资产导出失败",
+        detail: reason,
+        route: "library?exports=1",
+      });
       update((s) => {
         const t = s.tasks.find((t) => t.id === id);
         if (t) {

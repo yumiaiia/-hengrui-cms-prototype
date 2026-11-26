@@ -44,7 +44,11 @@ export const permissionModules: PermissionModule[] = [
         label: "维护内容标签",
         description: "添加、移除材料及页级标签，采纳已入库推荐",
       },
-      { key: "void", label: "作废内容", description: "作废内容并填写原因" },
+      {
+        key: "void",
+        label: "作废内容",
+        description: "单份或批量作废内容，二次确认后生效，作废后不可恢复",
+      },
       {
         key: "export",
         label: "下载与导出",

@@ -51,7 +51,9 @@ export async function writeTagWorkbook(tags: Tag[], template = false) {
     sheet.addRow(roots ? headers : [...headers, "分类ID", "分类名称"]);
     for (const tag of template
       ? []
-      : tags.filter((t) => (t.parentId === null) === roots))
+      : tags.filter(
+          (t) => (t.parentId === null) === roots && !t.locked,
+        ))
       sheet.addRow([
         tag.id,
         tag.name,
@@ -178,12 +180,16 @@ export function previewTagImport(
           );
       if (old && (old.parentId === null) !== root)
         throw new Error("不能改变标签级别");
+      if (old?.locked)
+        throw new Error("系统预置标签不可通过导入修改或停用");
       const tag: Tag = {
         id: old?.id || row.id || uid("tag"),
         name: row.name.trim(),
         parentId: parent?.id || null,
         enabled: row.enabled,
         external: row.external,
+        locked: old?.locked,
+        manualOnly: old?.manualOnly,
       };
       if (seen.has(tag.id)) throw new Error("文件中存在重复标签");
       seen.add(tag.id);

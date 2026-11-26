@@ -98,7 +98,7 @@ describe("标签更新结果与确认", () => {
     expect(i.recommendations).toHaveLength(0);
     expect(s.suggestions[0].contexts?.[0].version).toBe(oldVersion);
   });
-  it("计算完成只暂存完整结果，确认更新后才改变标签且不增加文件版本", () => {
+  it("计算完成只暂存完整结果，确认归档后创建新版本并写入新标签", () => {
     const { s, a, v } = setup();
     const before = structuredClone(v),
       versions = a.versions.length,
@@ -118,12 +118,14 @@ describe("标签更新结果与确认", () => {
     confirmStaged(s, b.id, i.id);
     expect(v).toEqual(before);
     expect(archiveStaged(s, b.id, [i.id])).toEqual({ success: 1, failed: 0 });
-    expect(v.tags).toEqual(i.v.tags);
-    expect(a.versions).toHaveLength(versions);
-    expect(v.fileKey).toBe(before.fileKey);
-    expect(v.approval).toEqual(before.approval);
-    expect(v.confirmedAt).toBe(before.confirmedAt);
-    expect(v.cover).toBe(before.cover);
+    expect(a.versions).toHaveLength(versions + 1);
+    const next = current(a);
+    expect(next.number).toBe(before.number + 1);
+    expect(next.tags).toEqual(i.v.tags);
+    expect(next.fileKey).toBe(before.fileKey);
+    expect(next.approval).toEqual(before.approval);
+    expect(next.cover).toBe(before.cover);
+    expect(v).toEqual(before);
     expect(s.publications).toEqual(pubs);
     expect(archiveStaged(s, b.id, [i.id])).toEqual({ success: 0, failed: 0 });
   });
@@ -242,7 +244,7 @@ describe("标签更新结果与确认", () => {
     confirmStaged(s, b.id, i.id);
     expect(archiveStaged(s, b.id, [i.id]).success).toBe(1);
   });
-  it("确认后再修改标签结果须重新确认，人工移除在下次匹配中生效", () => {
+  it("确认后再修改标签结果须重新确认，人工移除在归档新版本中生效", () => {
     const { s, a, v } = setup();
     const b = match(s, a.id),
       i = b.items[0];
@@ -254,11 +256,13 @@ describe("标签更新结果与确认", () => {
     expect(archiveStaged(s, b.id, [i.id]).success).toBe(0);
     confirmStaged(s, b.id, i.id);
     archiveStaged(s, b.id, [i.id]);
+    const next = current(a);
+    expect(next.number).toBe(v.number + 1);
     expect(
-      matchingResult(v, s.tags).some((x) => x.tagId === "t1" && x.page === 1),
+      matchingResult(next, s.tags).some((x) => x.tagId === "t1" && x.page === 1),
     ).toBe(false);
     expect(
-      matchingResult(v, s.tags).some((x) => x.tagId === "t1" && x.page === 2),
+      matchingResult(next, s.tags).some((x) => x.tagId === "t1" && x.page === 2),
     ).toBe(true);
   });
   it("正式标签在确认后被编辑时拒绝旧结果，重新匹配后可继续", () => {
@@ -277,19 +281,20 @@ describe("标签更新结果与确认", () => {
     confirmStaged(s, b.id, i.id);
     expect(archiveStaged(s, b.id, [i.id]).success).toBe(1);
   });
-  it("标签改名、停用或新增后拒绝旧结果，原文件标签不受影响", () => {
+  it("标签改名或停用后仍可确认归档，元数据保持只读，原版本不受影响", () => {
     const { s, a, v } = setup();
     const b = match(s, a.id),
       i = b.items[0];
     const original = structuredClone(v);
     s.tags[1].name = "新值";
-    expect(() => confirmStaged(s, b.id, i.id)).toThrow("标签库已更新");
-    expect(v).toEqual(original);
     expect(() => patchStaged(s, b.id, i.id, { title: "违规修改" })).toThrow(
       "仅允许维护标签",
     );
+    confirmStaged(s, b.id, i.id);
+    expect(archiveStaged(s, b.id, [i.id]).success).toBe(1);
+    expect(v).toEqual(original);
   });
-  it("无标签结果可直接确认，失败结果仍然阻止提交", () => {
+  it("无标签结果可直接确认，失败结果仍然阻止确认", () => {
     const { s, a, v } = setup();
     v.tags = [];
     v.content = ["完全不同内容"];
