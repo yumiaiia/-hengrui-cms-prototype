@@ -22,7 +22,11 @@ import {
   expiryStatus,
   go,
   now,
+  VISIBILITY_FIELD,
+  audienceLabel,
+  audienceShort,
 } from "../model";
+import { audiencesOf } from "../tagResults";
 import { pendingRecommendationsForVersion } from "../taxonomy";
 import { matchesTags, pageHits } from "../workflow";
 import {
@@ -49,6 +53,7 @@ type Filters = {
   process: string;
   tagStatus: string;
   lifecycle: string;
+  visibility: string;
   tags: string[];
   pageTags: string[];
 };
@@ -61,6 +66,7 @@ const defaults: Filters = {
   process: "",
   tagStatus: "",
   lifecycle: "正常",
+  visibility: "",
   tags: [],
   pageTags: [],
 };
@@ -138,6 +144,10 @@ export default function ContentLibrary() {
           (!filters.expiry || expiryStatus(v) === filters.expiry) &&
           (!filters.approval || v.approval.mode === filters.approval) &&
           (!filters.tagStatus || v.tagStatus === filters.tagStatus) &&
+          (!filters.visibility ||
+            (filters.visibility === "未设置"
+              ? !audiencesOf(v, state.tags).length
+              : audiencesOf(v, state.tags).includes(filters.visibility))) &&
           (!filters.process ||
             (filters.process === "异常"
               ? fileParsingFailed(v)
@@ -211,7 +221,9 @@ export default function ContentLibrary() {
       ? { pending: "待补充", registered: "已登记", exempt: "无需登记" }[
           value
         ] || value
-      : value;
+      : key === "visibility"
+        ? `可见范围 ${value}`
+        : value;
   function retryFile(assetId: string, version: number) {
     try {
       const asset = assets.find((a) => a.id === assetId);
@@ -379,6 +391,25 @@ export default function ContentLibrary() {
                     <option>正常</option>
                     <option>已作废</option>
                     <option value="">全部</option>
+                  </select>
+                </Field>
+                <Field label="用户可见范围">
+                  <select
+                    value={filters.visibility}
+                    onChange={(e) => change("visibility", e.target.value)}
+                  >
+                    <option value="">全部</option>
+                    {state.tags
+                      .filter(
+                        (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+                      )
+                      .sort((a, b) => (a.order || 0) - (b.order || 0))
+                      .map((t) => (
+                        <option key={t.id} value={t.name}>
+                          {t.name}
+                        </option>
+                      ))}
+                    <option value="未设置">未设置</option>
                   </select>
                 </Field>
               </div>
@@ -619,6 +650,19 @@ export default function ContentLibrary() {
                                 <Plus size={13} />
                               </button>
                             </div>
+                            <small className="row-secondary">
+                              可见范围：
+                              {audienceShort(
+                                audiencesOf(v, state.tags),
+                                state.tags.filter(
+                                  (t) =>
+                                    t.parentId === VISIBILITY_FIELD && t.enabled,
+                                ).length,
+                              )}
+                              {v.fieldsManual?.includes(VISIBILITY_FIELD)
+                                ? "（人工）"
+                                : ""}
+                            </small>
                             {pendingRecommendationsForVersion(state, a)
                               .length ? (
                               <button

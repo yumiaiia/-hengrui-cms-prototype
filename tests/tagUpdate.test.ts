@@ -132,7 +132,7 @@ describe("标签更新结果与确认", () => {
   it("分类停用时所有旧绑定保留，新增停用标签不产生绑定", () => {
     const { s, v } = setup();
     s.tags[0].enabled = false;
-    const r = matchingResult(v, s.tags);
+    const r = matchingResult(v, s.tags).tags;
     expect(r).toEqual(v.tags);
     expect(r.some((x) => x.tagId === "t1")).toBe(false);
   });
@@ -140,7 +140,7 @@ describe("标签更新结果与确认", () => {
     const { s, v } = setup();
     s.tags.find((t) => t.id === "t0")!.name = "正文";
     s.tags.find((t) => t.id === "t2")!.name = "新的人工标签";
-    const r = matchingResult(v, s.tags);
+    const r = matchingResult(v, s.tags).tags;
     expect(r).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ tagId: "t0", name: "正文", origin: "AI" }),
@@ -159,7 +159,7 @@ describe("标签更新结果与确认", () => {
     s.tags.find((t) => t.id === "t0")!.name = "不在正文中的新名称";
     v.tags.push(stampBinding({ tagId: "t1", origin: "人工", page: 1 }, s.tags));
     const original = structuredClone(v);
-    const r = matchingResult(v, s.tags);
+    const r = matchingResult(v, s.tags).tags;
     expect(r).toContainEqual({
       tagId: "t0",
       origin: "AI",
@@ -171,7 +171,7 @@ describe("标签更新结果与确认", () => {
       "人工",
     );
     expect(r.some((b) => b.tagId === "t1" && b.page === 2)).toBe(true);
-    expect(matchingResult({ ...v, tags: r }, s.tags)).toEqual(r);
+    expect(matchingResult({ ...v, tags: r }, s.tags).tags).toEqual(r);
     expect(v).toEqual(original);
   });
   it("新增启用标签参与补充，新增停用标签不添加", () => {
@@ -192,7 +192,7 @@ describe("标签更新结果与确认", () => {
         external: false,
       },
     );
-    const r = matchingResult(v, s.tags);
+    const r = matchingResult(v, s.tags).tags;
     expect(r.some((b) => b.tagId === "new-active" && b.page === 2)).toBe(true);
     expect(r.some((b) => b.tagId === "new-disabled")).toBe(false);
     expect(r).toEqual(expect.arrayContaining(v.tags));
@@ -201,16 +201,16 @@ describe("标签更新结果与确认", () => {
     const { s, v } = setup();
     const tag = s.tags.find((t) => t.id === "t3")!;
     tag.name = "正文";
-    const disabled = matchingResult(v, s.tags);
+    const disabled = matchingResult(v, s.tags).tags;
     expect(disabled.filter((b) => b.tagId === tag.id)).toHaveLength(1);
     tag.enabled = true;
-    const enabled = matchingResult(v, s.tags);
+    const enabled = matchingResult(v, s.tags).tags;
     expect(
       enabled.filter((b) => b.tagId === tag.id && b.page === 1),
     ).toHaveLength(1);
     expect(enabled.some((b) => b.tagId === tag.id && b.page === 2)).toBe(true);
     s.tags[0].enabled = false;
-    const inactiveParent = matchingResult(v, s.tags);
+    const inactiveParent = matchingResult(v, s.tags).tags;
     expect(inactiveParent.filter((b) => b.tagId === tag.id)).toHaveLength(1);
   });
   it("分类变更按最新分类展示，启用后恢复计算但不抹去人工排除", () => {
@@ -224,7 +224,7 @@ describe("标签更新结果与确认", () => {
     });
     const t = s.tags.find((t) => t.id === "t1")!;
     t.parentId = "r2";
-    expect(matchingResult(v, s.tags)).toEqual(
+    expect(matchingResult(v, s.tags).tags).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ tagId: t.id, parentId: "r2" }),
       ]),
@@ -232,7 +232,7 @@ describe("标签更新结果与确认", () => {
     excludeTag(v, { name: t.name, parentId: t.parentId }, 1);
     t.enabled = false;
     t.enabled = true;
-    const r = matchingResult(v, s.tags);
+    const r = matchingResult(v, s.tags).tags;
     expect(r.some((x) => x.tagId === t.id && x.page === 1)).toBe(false);
     expect(r.some((x) => x.tagId === t.id && x.page === 2)).toBe(true);
   });
@@ -259,10 +259,10 @@ describe("标签更新结果与确认", () => {
     const next = current(a);
     expect(next.number).toBe(v.number + 1);
     expect(
-      matchingResult(next, s.tags).some((x) => x.tagId === "t1" && x.page === 1),
+      matchingResult(next, s.tags).tags.some((x) => x.tagId === "t1" && x.page === 1),
     ).toBe(false);
     expect(
-      matchingResult(next, s.tags).some((x) => x.tagId === "t1" && x.page === 2),
+      matchingResult(next, s.tags).tags.some((x) => x.tagId === "t1" && x.page === 2),
     ).toBe(true);
   });
   it("正式标签在确认后被编辑时拒绝旧结果，重新匹配后可继续", () => {
@@ -458,12 +458,12 @@ describe("取消批次与推荐", () => {
     expect(pendingSuggestions(s, a, a.current, 1)).toHaveLength(0);
     expect(pendingSuggestions(s, a, a.current, 2)).toHaveLength(1);
     expect(
-      matchingResult(v, s.tags).some((b) => b.tagId === "t1" && b.page === 1),
+      matchingResult(v, s.tags).tags.some((b) => b.tagId === "t1" && b.page === 1),
     ).toBe(false);
     setRecommendationCancelled(s, "r", false, c);
     expect(pendingSuggestions(s, a, a.current, 1)).toHaveLength(1);
     expect(
-      matchingResult(v, s.tags).some((b) => b.tagId === "t1" && b.page === 1),
+      matchingResult(v, s.tags).tags.some((b) => b.tagId === "t1" && b.page === 1),
     ).toBe(true);
   });
   it("待归档取消推荐不删除字典，取消操作保留一条简短用户审计", () => {

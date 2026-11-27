@@ -25,6 +25,7 @@ import { seedState } from "./seed";
 import { migrateState } from "./migration";
 import { prepareWorkspace } from "./workflow";
 import { availableTag } from "./taxonomy";
+import { matchingResult } from "./tagMatching";
 import {
   canRole,
   primaryTagId,
@@ -326,98 +327,23 @@ export function CMSProvider({ children }: { children: ReactNode }) {
               const asset = s.assets.find((a) => a.id === item.assetId);
               const v = asset?.versions.find((v) => v.number === item.version);
               if (v && task.type === "解析与打标") {
-                if (task.type === "解析与打标") v.process = "完成";
+                v.process = "完成";
                 v.tagStatus = "已完成";
                 if (!v.pageStates && ["PDF", "PPT", "Word"].includes(v.kind))
                   v.pageStates = Object.fromEntries(
                     Array.from({ length: v.pages }, (_, i) => [
                       i + 1,
-                      { status: "完成" },
+                      { status: "完成" as const },
                     ]),
                   );
-                if (v.pageStates)
-                  for (const page of Object.values(v.pageStates))
-                    if (page.status === "打标中" || page.status === "待打标") {
-                      page.status = "完成";
-                      page.error = undefined;
-                    }
-                v.unmatched = undefined;
-                if (!v.tags.some((t) => t.origin === "AI" && !t.page))
-                  for (const id of ["t3", "t5"]) {
-                    const tag = s.tags.find((t) => t.id === id);
-                    if (
-                      tag &&
-                      availableTag(s.tags, tag) &&
-                      !v.tags.some((b) => b.tagId === id && !b.page)
-                    )
-                      v.tags.push({ tagId: id, origin: "AI" });
-                  }
-                if (["PDF", "PPT", "Word"].includes(v.kind)) {
-                  const choices = s.tags.filter(
-                    (t) =>
-                      t.parentId === primaryTagId("页面类型") &&
-                      availableTag(s.tags, t),
-                  );
-                  for (let page = 1; page <= v.pages; page++) {
-                    const tag =
-                      choices[(page - 1) % Math.max(1, choices.length)];
-                    if (tag && !v.tags.some((b) => b.page === page))
-                      v.tags.push({ tagId: tag.id, origin: "AI", page });
-                  }
-                }
-                const parent = s.tags.find(
-                  (t) =>
-                    t.parentId === null &&
-                    t.id === primaryTagId("Key Message") &&
-                    t.enabled,
+                // 与正式匹配同一套引擎：AI 命中 → 单值收敛 → 规则推导。
+                const next = matchingResult(
+                  structuredClone(v),
+                  s.tags,
+                  s.rules,
                 );
-                if (parent) {
-                  const name = "研究要点提炼";
-                  const known = s.tags.find(
-                    (t) =>
-                      t.parentId === parent.id &&
-                      t.name === name &&
-                      availableTag(s.tags, t),
-                  );
-                  if (known) {
-                    if (!v.tags.some((b) => b.tagId === known.id && !b.page))
-                      v.tags.push({ tagId: known.id, origin: "AI" });
-                  } else {
-                    let suggestion = s.suggestions.find(
-                      (r) => r.parentId === parent.id && r.name === name,
-                    );
-                    if (!suggestion) {
-                      suggestion = {
-                        id: uid("suggestion"),
-                        name,
-                        parentId: parent.id,
-                        mentions: 0,
-                        assetIds: [],
-                        contexts: [],
-                        accepted: [],
-                        status: "待处理",
-                      };
-                      s.suggestions.unshift(suggestion);
-                    }
-                    if (
-                      !suggestion.contexts?.some(
-                        (c) =>
-                          c.assetId === asset!.id && c.version === v.number,
-                      )
-                    ) {
-                      suggestion.contexts ||= [];
-                      suggestion.contexts.push({
-                        assetId: asset!.id,
-                        version: v.number,
-                      });
-                      suggestion.mentions++;
-                    }
-                    if (!suggestion.assetIds.includes(asset!.id))
-                      suggestion.assetIds.push(asset!.id);
-                    v.tagStatus = "未匹配";
-                    v.unmatched = "有新的标签建议待处理（原型模拟）。";
-                  }
-                }
+                v.tags = next.tags;
+                v.fields = next.fields;
               }
             }
             s.notices.unshift({

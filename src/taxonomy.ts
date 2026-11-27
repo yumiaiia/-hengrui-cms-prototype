@@ -1,5 +1,5 @@
 import { normalizeTagName, requireTagCheck } from "./tagSimilarity";
-import { allowTag, applyDerivedTags, maintainBindings } from "./tagResults";
+import { allowTag, applyRules, maintainBindings } from "./tagResults";
 import {
   canRole,
   current,
@@ -28,12 +28,22 @@ export const availableTag = (tags: Tag[], tag: Tag) =>
         parent.parentId === null &&
         parent.enabled,
     ));
-/** 不参与 AI 匹配集合在所有自动打标链路中排除，仅允许人工添加。 */
-export const aiEligibleTag = (tags: Tag[], tag: Tag) =>
-  availableTag(tags, tag) && !tag.manualOnly;
+/** AI 匹配范围由维度决定：ai=不参与 或取值仅由规则产生，都不进入自动打标。 */
+export const aiEligibleTag = (tags: Tag[], tag: Tag) => {
+  const dimension = tag.parentId
+    ? tags.find((t) => t.id === tag.parentId)
+    : undefined;
+  return (
+    availableTag(tags, tag) &&
+    (dimension?.ai || "closed") !== "none" &&
+    !tag.derivedOnly
+  );
+};
+export const dimensionOfTag = (tags: Tag[], tag: Tag) =>
+  tag.parentId ? tags.find((t) => t.id === tag.parentId) : tag;
 export function validateTag(
   tags: Tag[],
-  draft: Pick<Tag, "name" | "parentId"> & { id?: string },
+  draft: Pick<Tag, "name" | "parentId"> & { id?: string; aliases?: string[] },
 ) {
   if (!draft.name.trim()) return "请输入标签名称";
   if (
@@ -53,6 +63,23 @@ export function validateTag(
     )
   )
     return "该层级下已有同名标签";
+  const aliases = (draft.aliases || []).map(normalizeTagName).filter(Boolean);
+  const selfName = normalizeTagName(draft.name);
+  if (new Set([selfName, ...aliases]).size !== aliases.length + 1)
+    return "别名不能重复或与标签名称相同";
+  for (const alias of aliases) {
+    if (
+      tags.some(
+        (t) =>
+          t.id !== draft.id &&
+          t.parentId === draft.parentId &&
+          [normalizeTagName(t.name), ...(t.aliases || []).map(normalizeTagName)].includes(
+            alias,
+          ),
+      )
+    )
+      return `该层级下已有同名标签或别名：${draft.aliases?.find((a) => normalizeTagName(a) === alias) || alias}`;
+  }
   return "";
 }
 export function suggestionContexts(s: Suggestion, assets: Asset[]) {
@@ -208,15 +235,24 @@ export function bindTag(
   if (!tag?.parentId || !availableTag(state.tags, tag))
     throw new Error("请选择已启用的二级标签");
   if (!version.tags.some((b) => b.tagId === tagId && b.page === page)) {
+    // 单值维度：人工新绑定的取值替换同位置原有取值（被替换项记入排除记忆）。
+    const parent = dimensionOfTag(state.tags, tag);
+    if (parent?.cardinality === "single")
+      maintainBindings(
+        version,
+        version.tags.filter(
+          (b) =>
+            b.page !== page ||
+            (b.parentId || state.tags.find((t) => t.id === b.tagId)?.parentId) !==
+              parent.id,
+        ),
+        state.tags,
+      );
     version.tags.push({ tagId, origin: "人工", page });
-    version.tags = applyDerivedTags(
-      version.tags,
-      version.tagExclusions,
-      state.tags,
-    );
+    allowTag(version, tag, page);
+    applyRules(version, state.tags, state.rules);
     asset.updatedAt = now();
   }
-  allowTag(version, tag, page);
 }
 export function removeTag(
   state: State,
@@ -231,6 +267,7 @@ export function removeTag(
     version.tags.filter((b) => !(b.tagId === tagId && b.page === page)),
     state.tags,
   );
+  applyRules(version, state.tags, state.rules);
   asset.updatedAt = now();
 }
 export function acceptSuggestedTag(

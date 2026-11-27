@@ -422,7 +422,7 @@ describe("标签相似检查", () => {
     s.tags = structuredClone(tags);
     const rows: TagImportRow[] = [
       {
-        sheet: "标签",
+        sheet: "取值",
         row: 2,
         id: "",
         name: "非小细胞肺癌病",
@@ -434,10 +434,10 @@ describe("标签相似检查", () => {
     let preview = previewTagImport(s, rows);
     expect(preview.rows[0].similar?.length).toBeGreaterThan(0);
     expect(() => applyTagImport(s, preview)).toThrow("相似");
-    preview = previewTagImport(s, rows, { "标签-2": "skip" });
+    preview = previewTagImport(s, rows, { "取值-2": "skip" });
     applyTagImport(s, preview);
     expect(s.tags).toHaveLength(3);
-    preview = previewTagImport(s, rows, { "标签-2": "keep" });
+    preview = previewTagImport(s, rows, { "取值-2": "keep" });
     applyTagImport(s, preview);
     expect(s.tags).toHaveLength(4);
   });

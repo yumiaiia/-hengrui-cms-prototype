@@ -23,8 +23,11 @@ import {
   ocrWarnings,
   now,
   go,
+  VISIBILITY_FIELD,
+  audienceLabel,
   type SupplementaryVideo,
 } from "../model";
+import { applyRules, audiencesOf, fieldValuesOf } from "../tagResults";
 import { loadBlob, download } from "../storage";
 import {
   AssetImage,
@@ -114,6 +117,52 @@ export default function ContentDetail({ id }: { id: string }) {
     } catch (e) {
       toast(e instanceof Error ? e.message : "原文件暂不可用");
     }
+  }
+  // 人工调整受众集合；传 undefined 表示恢复"按规则"。
+  function setAudiences(next?: string[]) {
+    const saved = update(
+      (s) => {
+        const a = s.assets.find((a) => a.id === id)!;
+        const target = a.versions.find((x) => x.number === v!.number)!;
+        if (next) {
+          target.fields ||= {};
+          target.fields[VISIBILITY_FIELD] = next
+            .map(
+              (name) =>
+                s.tags.find(
+                  (t) => t.parentId === VISIBILITY_FIELD && t.name === name,
+                )?.id,
+            )
+            .filter((id): id is string => !!id);
+          target.fieldsManual = [
+            ...new Set([...(target.fieldsManual || []), VISIBILITY_FIELD]),
+          ];
+        } else {
+          target.fieldsManual = target.fieldsManual?.filter(
+            (dim) => dim !== VISIBILITY_FIELD,
+          );
+          applyRules(target, s.tags, s.rules);
+        }
+        a.updatedAt = now();
+      },
+      {
+        action: "修改内容标签",
+        object: asset!.code,
+        category: "标签",
+        detail: `用户可见范围 → ${
+          next
+            ? audienceLabel(
+                next,
+                state.tags.filter(
+                  (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+                ).length,
+              )
+            : "按规则"
+        }`,
+      },
+      "tags",
+    );
+    if (saved) toast("可见范围已更新。");
   }
   function openEdit() {
     setTitle(v!.title);
@@ -300,6 +349,22 @@ export default function ContentDetail({ id }: { id: string }) {
             <span className="muted">尚未添加材料标签</span>
           ) : null}
         </div>
+        <div className="tag-chips">
+          <span className="muted">用户可见范围：</span>
+          <Badge tone="blue">
+            {audienceLabel(
+              audiencesOf(v, state.tags),
+              state.tags.filter(
+                (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+              ).length,
+            )}
+          </Badge>
+          {v.fieldsManual?.includes(VISIBILITY_FIELD) ? (
+            <small className="muted">人工设置</small>
+          ) : (
+            <small className="muted">按派生规则</small>
+          )}
+        </div>
         <Button
           variant="ghost"
           disabled={!can("tags") || historical || asset.lifecycle !== "正常"}
@@ -363,6 +428,63 @@ export default function ContentDetail({ id }: { id: string }) {
       {modal === "material-tags" ? (
         <Dialog drawer title="材料标签" onClose={() => setModal("")}>
           <p className="muted">作用于整份内容，不影响各页标签。</p>
+          <Field label="用户可见范围（字段，取值可多选，规则可推导默认值）">
+            <div className="audience-options">
+              {state.tags
+                .filter(
+                  (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+                )
+                .sort((a, b) => (a.order || 0) - (b.order || 0))
+                .map((option) => {
+                  const current = audiencesOf(v, state.tags);
+                  const checked = current.includes(option.name);
+                  return (
+                    <label
+                      key={option.id}
+                      className={`audience-option ${checked ? "on" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={
+                          !can("tags") ||
+                          historical ||
+                          asset.lifecycle !== "正常"
+                        }
+                        onChange={(event) =>
+                          setAudiences(
+                            event.target.checked
+                              ? [...current, option.name]
+                              : current.filter((a) => a !== option.name),
+                          )
+                        }
+                      />
+                      {option.name}
+                    </label>
+                  );
+                })}
+            </div>
+            <p className="audience-hint">
+              {v.fieldsManual?.includes(VISIBILITY_FIELD) ? "人工设置" : "按规则推导"}
+              ，规则建议：
+              {audienceLabel(
+                (() => {
+                  const probe = structuredClone(v);
+                  probe.fieldsManual = undefined;
+                  applyRules(probe, state.tags, state.rules);
+                  return audiencesOf(probe, state.tags);
+                })(),
+                state.tags.filter(
+                  (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+                ).length,
+              )}
+              {v.fieldsManual?.includes(VISIBILITY_FIELD) ? (
+                <Button variant="ghost" onClick={() => setAudiences(undefined)}>
+                  恢复按规则
+                </Button>
+              ) : null}
+            </p>
+          </Field>
           <TagPanel assetId={id} versionNumber={v.number} />
         </Dialog>
       ) : null}
@@ -391,6 +513,16 @@ export default function ContentDetail({ id }: { id: string }) {
             <dd>{dateLabel(v.archivedAt || v.createdAt)}</dd>
             <dt>有效期</dt>
             <dd>{v.approval.snapshot?.expiry || v.expiry || "未设置"}</dd>
+            <dt>用户可见范围</dt>
+            <dd>
+              {audienceLabel(
+              audiencesOf(v, state.tags),
+              state.tags.filter(
+                (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+              ).length,
+            )}
+              {v.fieldsManual?.includes(VISIBILITY_FIELD) ? " · 人工设置" : ""}
+            </dd>
           </dl>
           <h3>摘要</h3>
           <p className="summary-text">{v.summary || "未填写"}</p>

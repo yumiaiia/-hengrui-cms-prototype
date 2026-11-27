@@ -269,19 +269,19 @@ describe("标签 Excel 交换", () => {
   it("导出重新导入保持 ID、层级、状态和绑定，模板可解析", async () => {
     const s = setup(),
       rows = await readTagWorkbook(
-        await (await writeTagWorkbook(s.tags)).arrayBuffer(),
+        await (await writeTagWorkbook(s.tags, s.rules)).arrayBuffer(),
       );
     const preview = previewTagImport(s, rows);
     expect(preview.rows.some((r) => r.error)).toBe(false);
     // 写死集合不导出，故仅统计可编辑标签。
-    expect(preview.unchanged).toBe(s.tags.filter((t) => !t.locked).length);
+    expect(preview.unchanged).toBe(s.tags.length + s.rules.length);
     expect(preview.updated + preview.added).toBe(0);
     const assets = structuredClone(s.assets);
     applyTagImport(s, preview);
     expect(s.assets).toEqual(assets);
     expect(
       await readTagWorkbook(
-        await (await writeTagWorkbook(s.tags, true)).arrayBuffer(),
+        await (await writeTagWorkbook(s.tags, s.rules, true)).arrayBuffer(),
       ),
     ).toEqual([]);
   });
@@ -291,7 +291,7 @@ describe("标签 Excel 交换", () => {
       tag = s.tags.find((t) => t.parentId === root.id)!;
     const rows: TagImportRow[] = [
       {
-        sheet: "标签",
+        sheet: "取值",
         row: 2,
         id: tag.id,
         name: "更新名称",
@@ -300,7 +300,7 @@ describe("标签 Excel 交换", () => {
         external: true,
       },
       {
-        sheet: "标签",
+        sheet: "取值",
         row: 3,
         id: "",
         name: "导入新标签",
@@ -321,7 +321,7 @@ describe("标签 Excel 交换", () => {
     const s = setup(),
       root = s.tags.find((t) => t.parentId === null)!;
     const row: TagImportRow = {
-      sheet: "标签",
+      sheet: "取值",
       row: 2,
       id: "",
       name: "新增",

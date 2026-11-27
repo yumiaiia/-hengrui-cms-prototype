@@ -19,12 +19,14 @@ import {
 } from "./taxonomy";
 import { normalizeTagName } from "./tagSimilarity";
 import {
-  applyDerivedTags,
+  applyRules,
   boundDefinitions,
+  enforceSingleValue,
   excludeTag,
   exclusionMatches,
   maintainBindings,
   stampBinding,
+  tagHitsText,
 } from "./tagResults";
 import { retryTagMatching } from "./tagMatching";
 import { planUploadVersions, type UploadInput } from "./upload";
@@ -282,11 +284,7 @@ export function patchStaged(
         throw new Error("只能添加已启用标签。");
     }
     maintainBindings(item.v, tags, s.tags);
-    item.v.tags = applyDerivedTags(
-      item.v.tags,
-      item.v.tagExclusions,
-      s.tags,
-    );
+    applyRules(item.v, s.tags, s.rules);
   }
   Object.assign(item.v, structuredClone(metadata));
   Object.assign(item, flags);
@@ -418,12 +416,10 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
         .join(" ")
         .normalize("NFKC")
         .toLowerCase();
+      // 命中条件：标签名 ∪ 别名（如产品通用名）任一词命中正文。
       const ai = s.tags
         .filter(
-          (t) =>
-            t.parentId &&
-            aiEligibleTag(s.tags, t) &&
-            text.includes(t.name.normalize("NFKC").toLowerCase()),
+          (t) => t.parentId && aiEligibleTag(s.tags, t) && tagHitsText(t, text),
         )
         .map((t) => ({ tagId: t.id, origin: "AI" as const }));
       item.v.tags = [
@@ -439,10 +435,7 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
         const body = item.v.content[page - 1]?.normalize("NFKC").toLowerCase();
         if (!body) continue;
         for (const tag of s.tags.filter(
-          (t) =>
-            t.parentId &&
-            aiEligibleTag(s.tags, t) &&
-            body.includes(t.name.normalize("NFKC").toLowerCase()),
+          (t) => t.parentId && aiEligibleTag(s.tags, t) && tagHitsText(t, body),
         ))
           if (!item.v.tags.some((b) => b.tagId === tag.id && b.page === page))
             item.v.tags.push({ tagId: tag.id, origin: "AI", page });
@@ -453,11 +446,9 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
           { status: "完成" as const },
         ]),
       );
-      item.v.tags = applyDerivedTags(
-        item.v.tags,
-        item.v.tagExclusions,
-        s.tags,
-      );
+      // 单值维度收敛后再走一次规则，规则产物整体重算。
+      item.v.tags = enforceSingleValue(item.v.tags, s.tags);
+      applyRules(item.v, s.tags, s.rules);
     }
     if (due.length)
       pushNotice(s, {
@@ -499,11 +490,9 @@ export function archiveStaged(
           number = Math.max(...asset.versions.map((v) => v.number)) + 1;
         const version: Version = {
           ...structuredClone(base),
-          tags: applyDerivedTags(
-            item.v.tags,
-            item.v.tagExclusions,
-            s.tags,
-          ).map((b) => stampBinding(b, s.tags)),
+          fields: structuredClone(item.v.fields),
+          fieldsManual: structuredClone(item.v.fieldsManual),
+          tags: item.v.tags.map((b) => stampBinding(b, s.tags)),
           tagExclusions: structuredClone(item.v.tagExclusions),
           number,
           createdAt: at,
@@ -574,11 +563,7 @@ export function archiveStaged(
           : 1;
       const version: Version = {
         ...structuredClone(item.v),
-        tags: applyDerivedTags(
-          item.v.tags,
-          item.v.tagExclusions,
-          s.tags,
-        ).map((b) => stampBinding(b, s.tags)),
+        tags: item.v.tags.map((b) => stampBinding(b, s.tags)),
         number,
         createdAt: at,
         archivedAt: at,

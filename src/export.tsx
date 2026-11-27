@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { Download, Package, Check } from "lucide-react";
 import { useCMS } from "./store";
-import { current, now, uid, type Asset } from "./model";
+import {
+  VISIBILITY_FIELD,
+  audienceLabel,
+  current,
+  now,
+  uid,
+  type Asset,
+} from "./model";
+import { audiencesOf } from "./tagResults";
 import { loadBlob, putFiles } from "./storage";
 import { Dialog, Field, Button, Note } from "./components/ui";
 const clean = (name: string) =>
@@ -94,16 +102,36 @@ export function ExportDialog({
           })),
           createdAt: v.createdAt,
           expiry: v.approval.snapshot?.expiry || v.expiry,
+          visibility: audienceLabel(
+            audiencesOf(v, state.tags),
+            state.tags.filter(
+              (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+            ).length,
+          ),
+          visibilitySource: v.fieldsManual?.includes(VISIBILITY_FIELD)
+            ? "人工"
+            : "规则",
           approval: {
             mode: v.approval.mode,
             credentialId: v.approval.credentialId,
             credential: v.approval.snapshot ? credential : undefined,
             evidenceCount: images.length,
           },
-          tags: v.tags.map((binding) => ({
-            ...state.tags.find((t) => t.id === binding.tagId),
-            origin: binding.origin,
-            page: binding.page,
+          tags: v.tags.map((binding) => {
+            const tag = state.tags.find((t) => t.id === binding.tagId);
+            return {
+              name: tag?.name || binding.name,
+              dimension: state.tags.find((t) => t.id === tag?.parentId)?.name,
+              origin: binding.origin,
+              ruleId: binding.ruleId,
+              page: binding.page,
+            };
+          }),
+          fields: Object.entries(v.fields || {}).map(([dim, ids]) => ({
+            dimension: state.tags.find((t) => t.id === dim)?.name,
+            values: ids.map(
+              (id) => state.tags.find((t) => t.id === id)?.name || id,
+            ),
           })),
         };
         files[folder + "metadata.json"] = strToU8(

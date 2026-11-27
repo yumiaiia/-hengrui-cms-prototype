@@ -57,14 +57,19 @@ export interface Credential {
 }
 export interface Binding {
   tagId: string;
-  origin: "AI" | "人工";
+  origin: "AI" | "人工" | "规则";
+  /** 命中本条取值的规则；origin 为「规则」时必填，用于追溯与统计。 */
+  ruleId?: string;
   page?: number;
   name?: string;
   parentId?: string;
 }
+/** 排除记忆：优先按取值 ID 记录（标签改名不失效）；
+ *  尚未入字典的推荐词按"名称 + 维度"记录，避免取消推荐后又被同名推荐补回。 */
 export interface TagExclusion {
-  name: string;
-  parentId: string;
+  valueId?: string;
+  name?: string;
+  parentId?: string;
   page?: number;
 }
 export interface Approval {
@@ -106,6 +111,10 @@ export interface Version {
   tagStatus: "待打标" | "打标中" | "已完成" | "未匹配" | "失败";
   tags: Binding[];
   tagExclusions?: TagExclusion[];
+  /** 枚举字段取值：维度 ID → 取值 ID 集合（用户可见范围 / 推广性质 / 内容渠道）。 */
+  fields?: Record<string, string[]>;
+  /** 人工调整过的字段维度；规则不再覆盖这些维度，可"按规则"恢复。 */
+  fieldsManual?: string[];
   approval: Approval;
   expiry?: string;
   unmatched?: string;
@@ -159,16 +168,65 @@ export interface Asset {
   updatedAt: string;
   voidReason?: string;
 }
+export type DimensionKind = "taxonomy" | "enum";
+export type Cardinality = "single" | "multi";
+export type DimensionScope = "material" | "page" | "both";
+export type AiMode = "closed" | "open" | "none";
+export type MergeMode = "union" | "priority";
 export interface Tag {
   id: string;
   name: string;
+  /** null = 维度（标签分类 / 枚举字段）；非空 = 该维度下的取值。 */
   parentId: string | null;
   enabled: boolean;
   external: boolean;
-  /** 预置集合一：字典写死集合，锁定禁改/禁停用，Excel 不导出。 */
-  locked?: boolean;
-  /** 预置集合二：不参与 AI 匹配集合，仅允许人工添加。 */
-  manualOnly?: boolean;
+  /** 打标别名（如产品通用名），与名称一起参与 AI 匹配。 */
+  aliases?: string[];
+  /** 仅由规则产生的取值：AI 与人工都不能直接打，只能被规则命中。 */
+  derivedOnly?: boolean;
+  /** 展示与合并顺序；枚举字段的档位也按它排（宽 → 窄）。 */
+  order?: number;
+  /** ↓ 维度属性，仅 parentId === null 时生效。 */
+  kind?: DimensionKind;
+  cardinality?: Cardinality;
+  scope?: DimensionScope;
+  ai?: AiMode;
+  merge?: MergeMode;
+  /** 所有规则都不命中时落的值（枚举字段兜底档）。 */
+  fallbackId?: string;
+  /** 人工能否修改规则结果；允许时人工永远优先于规则。 */
+  humanEditable?: boolean;
+}
+/** 维度就是一棵标签树的根节点，方便沿用 parentId 结构。 */
+export type Dimension = Tag & { parentId: null };
+/** 可见范围字段的锚点；取值本身完全由该维度下的值决定，不写死。 */
+export const VISIBILITY_FIELD = primaryTagId("用户可见范围");
+/** total = 该字段启用取值的数量；只有全选时才用"All / 全部"的说法。 */
+export const audienceLabel = (list: string[] = [], total = 0) => {
+  if (!list.length) return "未设置";
+  if (total > 0 && list.length === total)
+    return total === 3 ? "All三类用户" : `全部 ${total} 类用户`;
+  return list.join("、");
+};
+/** 列表等窄位置用的短标签，避免长集合换行。 */
+export const audienceShort = (list: string[] = [], total = 0) => {
+  if (!list.length) return "未设置";
+  if (total > 0 && list.length === total) return "全部用户";
+  return list.length === 1 ? list[0] : `${list.length} 类受众`;
+};
+/** 规则：整份内容命中触发起一组取值 → 产出一组取值。
+ *  合并方式、兜底值在目标维度上定义；触发只有"整份并集"一种，不再分页。 */
+export interface Rule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: {
+    dimensionId: string;
+    valueIds: string[];
+    match: "any" | "all";
+  };
+  action: { dimensionId: string; valueIds: string[] };
+  priority: number;
 }
 export interface Suggestion {
   id: string;
@@ -331,6 +389,8 @@ export interface UploadBatch {
   createdAt: string;
   kind?: "tags";
   tagSnapshot?: Tag[];
+  /** 批次启动时冻结的规则快照：整批按同一份规则计算。 */
+  ruleSnapshot?: Rule[];
   items: StagedUploadItem[];
 }
 export interface State {
@@ -341,6 +401,8 @@ export interface State {
   assets: Asset[];
   credentials: Credential[];
   tags: Tag[];
+  /** 派生规则：所有"触发 → 结果"都在这一处，不分散在取值上。 */
+  rules: Rule[];
   suggestions: Suggestion[];
   tasks: Task[];
   articles: Article[];

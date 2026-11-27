@@ -1,10 +1,17 @@
-import { referenceTags } from "./referenceTags";
+import {
+  refDimensionId,
+  refValueId,
+  referenceRules,
+  referenceTags,
+} from "./referenceTags";
 import { fileParsingFailed } from "./fileProcessing";
-import { primaryTagId } from "./model";
+import { VISIBILITY_FIELD, type Rule } from "./model";
+import { applyRules } from "./tagResults";
 import {
   current,
   expiryStatus,
   now,
+  primaryTagId,
   type Asset,
   type Binding,
   type Publication,
@@ -83,7 +90,7 @@ export function publicationProblems(asset: Asset, v: Version) {
   ].filter(Boolean) as string[];
 }
 export function prepareWorkspace(state: State): State {
-  if (state.workspaceRevision === 7) return state;
+  if (state.workspaceRevision === 10) return state;
   const s = structuredClone(state);
   for (const role of s.roles)
     if (role.menus.includes("library") && !role.menus.includes("publishing"))
@@ -153,81 +160,36 @@ export function prepareWorkspace(state: State): State {
         }));
       s.publications.push(record);
     }
-  // Upgrade known demonstration tags; keep user-created tags and bindings.
-  const aliases: Record<string, [string, string]> = {
-    t1: ["产品标签", "卡瑞利珠单抗"],
-    t2: ["药物分类", "PD-1抑制剂"],
-    t3: ["疾病领域", "非小细胞肺癌"],
-    t4: ["疾病领域", "类风湿关节炎"],
-    t5: ["内容主题", "临床研究"],
-    t6: ["治疗方案", "免疫联合化疗"],
-    t7: ["内容主题", "疾病知识与患教"],
-    t8: ["内容主题", "指南共识"],
-    t9: ["内容主题", "病例分享"],
-    t10: ["药物分类", "抗体药物"],
-    t11: ["治疗方案", "单药治疗"],
-  };
-  for (const [id, [group, name]] of Object.entries(aliases)) {
-    const t = s.tags.find((t) => t.id === id);
-    if (t) {
-      t.name = name;
-      t.parentId = primaryTagId(group);
-    }
-  }
-  for (const t of referenceTags)
-    if (
-      !s.tags.some((old) => old.name === t.name && old.parentId === t.parentId)
-    )
-      s.tags.push(structuredClone(t));
-  // 用户可见范围为派生标签目标，仅允许人工与派生规则添加，AI 链路排除。
-  for (const t of s.tags)
-    if (t.parentId === primaryTagId("用户可见范围")) t.manualOnly = true;
-  // 演示用写死集合预置值（正式值待上线前按初始化清单替换）。
-  for (const name of ["指南共识", "临床研究"]) {
-    const tag = s.tags.find((t) => t.parentId && t.name === name);
-    if (tag) {
-      tag.locked = true;
-      tag.enabled = true;
-    }
-  }
+  upgradeTagModel(s);
   const obsolete = [
     "产品 / 品牌",
     "产品线",
+    "产品标签",
+    "研究要点",
     "目标受众",
     "Key Message",
     "页面类型",
     "证据类型",
   ];
-  s.tags = s.tags.filter(
-    (t) =>
-      t.parentId !== null ||
-      !obsolete.includes(t.name) ||
-      s.tags.some((c) => c.parentId === t.id),
+  // 早期演示遗留的分类整体移除（含其取值与残留绑定），避免与新维度混在一起。
+  const obsoleteIds = new Set(
+    s.tags
+      .filter((t) => !t.parentId && obsolete.includes(t.name))
+      .flatMap((root) => [
+        root.id,
+        ...s.tags.filter((t) => t.parentId === root.id).map((t) => t.id),
+      ]),
   );
+  if (obsoleteIds.size) {
+    for (const a of s.assets)
+      for (const v of a.versions)
+        v.tags = v.tags.filter((b) => !obsoleteIds.has(b.tagId));
+    s.tags = s.tags.filter((t) => !obsoleteIds.has(t.id));
+  }
   for (const suggestion of s.suggestions) {
     if (!s.tags.some((t) => t.id === suggestion.parentId))
       suggestion.parentId = primaryTagId("内容主题");
   }
-  for (const a of s.assets)
-    for (const v of a.versions) {
-      if (
-        paginated(v) &&
-        v.process === "完成" &&
-        a.id.startsWith("a") &&
-        v.tags.some((b) => b.tagId === "t7")
-      ) {
-        if (!v.tags.some((b) => b.page === 3))
-          v.tags.push({ tagId: "t9", origin: "AI", page: 3 });
-        if (a.id === "a1") {
-          const treatment = s.tags.find((t) => t.name === "免疫联合化疗");
-          if (
-            treatment &&
-            !v.tags.some((b) => b.page === 2 && b.tagId === treatment.id)
-          )
-            v.tags.push({ tagId: treatment.id, origin: "AI", page: 2 });
-        }
-      }
-    }
   for (const p of s.publications || []) {
     const a = s.assets.find((a) => a.id === p.assetId);
     const v = a?.versions.find((v) => v.number === p.version);
@@ -263,14 +225,13 @@ export function prepareWorkspace(state: State): State {
           "病例分享与应用讨论\n\n本页为病例分享结构示例。页级标签为病例分享、单药治疗，与前两页分别管理。此为原型演示资料，不构成医学建议。",
         ],
         tags: [
-          { tagId: "t1", origin: "AI" },
-          { tagId: "t3", origin: "AI" },
-          { tagId: "t5", origin: "AI" },
-          { tagId: "t7", origin: "AI", page: 1 },
-          { tagId: "t8", origin: "AI", page: 2 },
-          { tagId: "t6", origin: "人工", page: 2 },
-          { tagId: "t9", origin: "AI", page: 3 },
-          { tagId: "t11", origin: "AI", page: 3 },
+          { tagId: refValueId("产品", "卡瑞利珠单抗"), origin: "AI" },
+          { tagId: refValueId("疾病领域", "非小细胞肺癌"), origin: "AI" },
+          { tagId: refValueId("内容类型", "文献解读"), origin: "AI" },
+          { tagId: refValueId("治疗方案", "免疫联合化疗"), origin: "人工" },
+          { tagId: refValueId("内容主题", "疾病预防"), origin: "AI", page: 1 },
+          { tagId: refValueId("内容主题", "循证医学"), origin: "AI", page: 2 },
+          { tagId: refValueId("内容主题", "治疗"), origin: "AI", page: 3 },
         ],
         pageStates: {
           1: { status: "完成" },
@@ -288,6 +249,8 @@ export function prepareWorkspace(state: State): State {
         changeNote: "更新指南证据与病例讨论",
         createdAt: now(),
       };
+      applyRules(base, s.tags, s.rules);
+      applyRules(latest, s.tags, s.rules);
       const maxCode = Math.max(
         0,
         ...s.assets.map((a) => Number(a.code.replace("CMS-", "")) || 0),
@@ -332,9 +295,217 @@ export function prepareWorkspace(state: State): State {
       s.publications!.unshift(p);
     }
   }
-  s.workspaceRevision = 7;
+  s.workspaceRevision = 10;
   return s;
 }
+
+/** 旧演示标签 → 新维度取值（CSV 口径），迁移时改写已有绑定。 */
+const LEGACY_TAG_MAP: Record<string, [string, string]> = {
+  t1: ["产品", "卡瑞利珠单抗"],
+  t2: ["药物分类", "PD-1抑制剂"],
+  t3: ["疾病领域", "非小细胞肺癌"],
+  t4: ["疾病领域", "类风湿关节炎"],
+  t5: ["内容类型", "文献解读"],
+  t6: ["治疗方案", "免疫联合化疗"],
+  t7: ["内容主题", "疾病预防"],
+  t8: ["内容主题", "循证医学"],
+  t9: ["内容主题", "治疗"],
+  t10: ["药物分类", "抗体药物"],
+  t11: ["治疗方案", "单药治疗"],
+};
+const LEGACY_AUDIENCES = ["未注册", "已注册待认证", "已认证"];
+/** 旧可见范围枚举值 → 新受众集合（旧枚举在迁移后会被字段配置取代）。 */
+function legacyAudiences(name: string): string[] {
+  if (name === "All三类用户") return [...LEGACY_AUDIENCES];
+  if (name === "已注册待认证") return ["已注册待认证", "已认证"];
+  return ["已认证"];
+}
+type LegacyState = State & {
+  visibilityRules?: { visibility: string; triggers: string[] }[];
+  derivationRules?: unknown;
+};
+type LegacyVersion = Version & {
+  visibility?: string;
+  visibilityManual?: boolean;
+};
+/**
+ * P0 迁移：写死集合 / deriveFrom / visibilityRules → 维度属性 + 规则 + 字段值。
+ * 只做一次性转换，不重算业务已确认的取值，除非规则需要重新推导。
+ */
+function upgradeTagModel(s: State) {
+  const legacy = s as LegacyState;
+  const versions: LegacyVersion[] = [
+    ...s.assets.flatMap((a) => a.versions),
+    ...(s.uploadBatches || []).flatMap((b) => b.items.map((i) => i.v)),
+  ];
+  // A. 用户可见范围：旧标签取值 → 字段值（受众集合）
+  const oldAudience = new Map<string, string>();
+  for (const t of s.tags)
+    if (t.parentId === VISIBILITY_FIELD && t.id !== refValueId("用户可见范围", t.name))
+      oldAudience.set(t.id, t.name);
+  for (const v of versions) {
+    const bound = v.tags.filter((b) => oldAudience.has(b.tagId));
+    const names = new Set<string>();
+    let manual = !!v.visibilityManual;
+    for (const b of bound) {
+      legacyAudiences(oldAudience.get(b.tagId)!).forEach((a) => names.add(a));
+      if (b.origin === "人工") manual = true;
+    }
+    if (v.visibility)
+      legacyAudiences(v.visibility).forEach((a) => names.add(a));
+    if (names.size) {
+      v.fields ||= {};
+      v.fields[VISIBILITY_FIELD] = LEGACY_AUDIENCES.filter((a) =>
+        names.has(a),
+      ).map((a) => refValueId("用户可见范围", a));
+      if (manual)
+        v.fieldsManual = [
+          ...new Set([...(v.fieldsManual || []), VISIBILITY_FIELD]),
+        ];
+    }
+    v.tags = v.tags.filter((b) => !oldAudience.has(b.tagId));
+    v.tagExclusions = v.tagExclusions?.filter(
+      (e) => !(e.valueId && oldAudience.has(e.valueId)),
+    );
+    delete v.visibility;
+    delete v.visibilityManual;
+  }
+  s.tags = s.tags.filter((t) => !oldAudience.has(t.id));
+  // 旧字段清理：历史旧名、值域受控、填充方式都不再是模型的一部分；
+  // 维度禁止停用，迁移时统一置为启用。
+  for (const t of s.tags) {
+    const legacyTag = t as Tag & {
+      legacyNames?: unknown;
+      valuePolicy?: unknown;
+      fillMode?: unknown;
+    };
+    delete legacyTag.legacyNames;
+    delete legacyTag.valuePolicy;
+    delete legacyTag.fillMode;
+    if (!t.parentId) t.enabled = true;
+  }
+  for (const rule of s.rules || []) {
+    const legacyRule = rule as Rule & {
+      source?: unknown;
+      trigger: { scope?: unknown };
+    };
+    delete legacyRule.source;
+    delete legacyRule.trigger.scope;
+  }
+  // B. 补齐新维度与取值：只补缺，不覆盖业务改动
+  for (const ref of referenceTags) {
+    const existing = s.tags.find((t) => t.id === ref.id);
+    if (!existing) {
+      s.tags.push(structuredClone(ref));
+      continue;
+    }
+    if (existing.parentId) continue;
+    for (const key of [
+      "kind",
+      "cardinality",
+      "scope",
+      "ai",
+      "merge",
+      "fallbackId",
+      "humanEditable",
+    ] as const)
+      if (existing[key] === undefined && ref[key] !== undefined)
+        Object.assign(existing, { [key]: ref[key] });
+  }
+  // C. 旧演示标签改写为新维度取值，绑定同步换 ID
+  const remap = new Map<string, string>();
+  for (const [oldId, [dim, name]] of Object.entries(LEGACY_TAG_MAP)) {
+    if (!s.tags.some((t) => t.id === oldId)) continue;
+    const target = s.tags.find(
+      (t) => t.parentId === refDimensionId(dim) && t.name === name,
+    );
+    if (target) remap.set(oldId, target.id);
+  }
+  if (remap.size) {
+    for (const v of versions)
+      v.tags = v.tags.map((b) =>
+        remap.has(b.tagId)
+          ? { ...b, tagId: remap.get(b.tagId)!, name: undefined, parentId: undefined }
+          : b,
+      );
+    for (const rule of legacy.visibilityRules || [])
+      rule.triggers = rule.triggers.map((id) => remap.get(id) || id);
+    s.tags = s.tags.filter((t) => !remap.has(t.id));
+  }
+  // C2. 早期演示分类并入同名新维度，避免出现"产品标签 / 产品"两套
+  const ROOT_MERGE: Record<string, string> = {
+    产品标签: "产品",
+    研究要点: "内容主题",
+  };
+  for (const [from, to] of Object.entries(ROOT_MERGE)) {
+    const source = s.tags.find((t) => !t.parentId && t.name === from);
+    const target = s.tags.find((t) => !t.parentId && t.name === to);
+    if (!source || !target) continue;
+    for (const child of s.tags.filter((t) => t.parentId === source.id)) {
+      const twin = s.tags.find(
+        (t) => t.parentId === target.id && t.name === child.name,
+      );
+      if (!twin) continue;
+      for (const v of versions)
+        v.tags = v.tags.map((b) =>
+          b.tagId === child.id
+            ? { ...b, tagId: twin.id, name: undefined, parentId: undefined }
+            : b,
+        );
+    }
+  }
+  // D. 旧可见范围触发配置 → 规则；再补 CSV 预置规则（按 ID 去重，删除的不会被灌回）
+  s.rules ||= [];
+  const converted: Rule[] = [];
+  for (const [index, old] of (legacy.visibilityRules || []).entries()) {
+    const triggers = old.triggers.filter((id) =>
+      s.tags.some((t) => t.id === id && t.parentId),
+    );
+    if (!triggers.length) continue;
+    converted.push({
+      id: `rule-legacy-visibility-${index + 1}`,
+      name: `旧可见范围规则：${old.visibility}`,
+      enabled: true,
+      priority: 60,
+      trigger: {
+        dimensionId:
+          s.tags.find((t) => t.id === triggers[0])?.parentId ||
+          refDimensionId("内容主题"),
+        valueIds: triggers,
+        match: "any",
+      },
+      action: {
+        dimensionId: VISIBILITY_FIELD,
+        valueIds: legacyAudiences(old.visibility).map((a) =>
+          refValueId("用户可见范围", a),
+        ),
+      },
+    });
+  }
+  for (const rule of [...converted, ...referenceRules])
+    if (!s.rules.some((r) => r.id === rule.id))
+      s.rules.push(structuredClone(rule));
+  delete legacy.visibilityRules;
+  delete legacy.derivationRules;
+  // E. 排除记忆补取值 ID：旧数据按名称记录，这里解析一次
+  for (const v of versions)
+    for (const e of v.tagExclusions || []) {
+      if (e.valueId || !e.name) continue;
+      const tag = s.tags.find(
+        (t) => t.parentId === (e.parentId || null) && t.name === e.name,
+      );
+      if (tag) e.valueId = tag.id;
+    }
+  // E2. 清理既不在标准字典、也没有任何绑定的旧取值，避免新旧两套混列
+  const refIds = new Set(referenceTags.map((t) => t.id));
+  const boundIds = new Set(versions.flatMap((v) => v.tags.map((b) => b.tagId)));
+  s.tags = s.tags.filter(
+    (t) => !t.parentId || refIds.has(t.id) || boundIds.has(t.id),
+  );
+  // F. 规则产物整体重算（人工改过的维度保持不变）
+  for (const v of versions) applyRules(v, s.tags, s.rules);
+}
+
 function locationOrigin() {
   return typeof location === "undefined"
     ? "http://127.0.0.1:5180"

@@ -3263,7 +3263,8 @@ textarea:focus-visible {
   }
 }
 .primary-preset-mark,
-.primary-manual-mark {
+.primary-manual-mark,
+.primary-single-mark {
   display: inline-block;
   font-style: normal;
   font-size: 10px;
@@ -3284,3 +3285,68 @@ textarea:focus-visible {
   background: #e9f1fb;
   border: 1px solid #cadcf5;
 }
+.primary-single-mark {
+  color: #8a5a00;
+  background: #fdf3e3;
+  border: 1px solid #f0dcb4;
+}
+.rule-tag-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+  padding: 4px 0;
+}
+.rule-tag-options button {
+  border: 1px solid #d9dfe8;
+  background: #f7f9fc;
+  border-radius: 14px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.rule-tag-options button.selected {
+  background: #1d5fae;
+  border-color: #1d5fae;
+  color: #fff;
+}
+.tag-editor-picker {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid #eef1f6;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.visibility-rules .section-heading {
+  align-items: flex-start;
+}
+.visibility-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid #eef1f6;
+}
+.visibility-rule-row > strong {
+  min-width: 110px;
+}
+.visibility-rule-row .tag-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.visibility-rule-row .tag-chips button {
+  border: none;
+  background: #e9f1fb;
+  color: #1d5fae;
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+

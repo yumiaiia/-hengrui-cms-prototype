@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { referenceTaxonomy } from "../src/referenceTags";
+import { referenceDimensions } from "../src/referenceTags";
 import { seedState } from "../src/seed";
 import { current, type State } from "../src/model";
 import { prepareWorkspace } from "../src/workflow";
@@ -105,22 +105,33 @@ describe("批量发布与版本快照", () => {
     expect(p.status).toBe("待发布");
     expect(p.snapshot?.number).toBe(2);
   });
-  it("CSV 五个分类已导入，联动示例每页标签不同", () => {
+  it("CSV 维度与字段已导入，联动示例每页标签不同", () => {
     const { s, a } = workspace();
     expect(s.tags.filter((t) => !t.parentId).map((t) => t.name)).toEqual(
       expect.arrayContaining([
-        "产品标签",
+        "内容类型",
+        "内容形式",
         "内容主题",
+        "产品",
         "疾病领域",
         "药物分类",
         "治疗方案",
+        "推广性质",
+        "用户可见范围",
+        "内容渠道",
       ]),
     );
-    for (const [group, names] of Object.entries(referenceTaxonomy)) {
-      const parent = s.tags.find((t) => t.name === group && !t.parentId)!;
+    for (const dimension of referenceDimensions) {
+      const parent = s.tags.find(
+        (t) => t.name === dimension.name && !t.parentId,
+      )!;
       expect(
         s.tags.filter((t) => t.parentId === parent.id).map((t) => t.name),
-      ).toEqual(expect.arrayContaining(names));
+      ).toEqual(
+        expect.arrayContaining(
+          dimension.values.map((v) => (typeof v === "string" ? v : v.name)),
+        ),
+      );
     }
     const v = current(a);
     expect(v.tags.filter((b) => b.page === 1).map((b) => b.tagId)).not.toEqual(

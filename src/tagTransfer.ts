@@ -1,25 +1,55 @@
 import { captureBindingNames } from "./tagResults";
 import { similarTags, normalizeTagName } from "./tagSimilarity";
-import { canRole, uid, type State, type Tag } from "./model";
+import {
+  canRole,
+  uid,
+  type Cardinality,
+  type Rule,
+  type State,
+  type Tag,
+} from "./model";
 import { validateTag } from "./taxonomy";
 import { tagImpact, tagUsage } from "./tagMatching";
+import { recalcRules, ruleImpact } from "./ruleImpact";
+
+/** 一次导入可能包含三类行：维度、取值、规则。 */
+export type ImportSheet = "维度" | "取值" | "规则";
 export interface TagImportRow {
-  sheet: string;
+  sheet: ImportSheet;
   row: number;
-  id: string;
+  id?: string;
   name: string;
   parentId?: string;
   parentName?: string;
   enabled: boolean;
   external: boolean;
+  aliases?: string[];
+  kind?: "taxonomy" | "enum";
+  cardinality?: Cardinality;
+  scope?: "material" | "page" | "both";
+  ai?: "closed" | "open" | "none";
+  merge?: "union" | "priority";
+  fallback?: string;
+  humanEditable?: boolean;
+  derivedOnly?: boolean;
+  order?: number;
+  rule?: {
+    triggerDimension: string;
+    triggerValues: string[];
+    match: "any" | "all";
+    actionDimension: string;
+    actionValues: string[];
+    priority: number;
+  };
   error?: string;
 }
 export interface TagImportPreview {
   tags: Tag[];
+  rules: Rule[];
   input: TagImportRow[];
   decisions: Record<string, "keep" | "skip">;
   rows: {
-    sheet: string;
+    sheet: ImportSheet;
     row: number;
     name: string;
     action: string;
@@ -39,52 +69,164 @@ export interface TagImportPreview {
   affected: number;
   baseline: string;
 }
-const headers = ["ID", "名称", "启用", "对外展示"];
-export async function writeTagWorkbook(tags: Tag[], template = false) {
+const dimensionHeaders = [
+  "ID",
+  "维度名称",
+  "类型",
+  "基数",
+  "作用域",
+  "AI 匹配",
+  "合并策略",
+  "兜底值",
+  "允许人工修改",
+];
+const valueHeaders = [
+  "ID",
+  "维度ID",
+  "维度名称",
+  "取值",
+  "别名",
+  "排序",
+  "仅规则产生",
+  "启用",
+  "对外展示",
+];
+const ruleHeaders = [
+  "ID",
+  "规则名称",
+  "触发维度",
+  "触发取值",
+  "匹配方式",
+  "目标维度",
+  "结果取值",
+  "优先级",
+  "启用",
+];
+const yesNo = (value?: boolean) => (value ? "是" : "否");
+const listCell = (values?: string[]) => (values || []).join("、");
+export const parseAliasCell = (value: string) => [
+  ...new Set(
+    value
+      .split(/[\n,，、;；]/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ),
+];
+const KIND_LABEL = { taxonomy: "分类维度", enum: "字段" } as const;
+const KIND_VALUE = { 分类维度: "taxonomy", 字段: "enum" } as const;
+const SCOPE_LABEL = {
+  material: "材料级",
+  page: "页级",
+  both: "材料级与页级",
+} as const;
+const SCOPE_VALUE: Record<string, "material" | "page" | "both"> = {
+  材料级: "material",
+  页级: "page",
+  材料级与页级: "both",
+  两者: "both",
+};
+const AI_LABEL = { closed: "闭集", open: "开放", none: "不参与" } as const;
+const AI_VALUE: Record<string, "closed" | "open" | "none"> = {
+  闭集: "closed",
+  闭集参与: "closed",
+  开放: "open",
+  开放参与: "open",
+  不参与: "none",
+};
+const MERGE_LABEL = { union: "并集", priority: "优先级" } as const;
+const MERGE_VALUE: Record<string, "union" | "priority"> = {
+  并集: "union",
+  优先级: "priority",
+};
+const MATCH_LABEL = { any: "任一命中", all: "全部命中" } as const;
+const MATCH_VALUE: Record<string, "any" | "all"> = {
+  任一命中: "any",
+  全部命中: "all",
+  任一: "any",
+  全部: "all",
+};
+function styleSheet(sheet: import("exceljs").Worksheet, width: number) {
+  sheet.columns.forEach((column, index) => (column.width = index === 0 ? 38 : 24));
+  sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+  sheet.getRow(1).eachCell(
+    (cell) =>
+      (cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF245AB5" },
+      }),
+  );
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  sheet.autoFilter = { from: "A1", to: { row: 1, column: width } };
+}
+export async function writeTagWorkbook(
+  tags: Tag[],
+  rules: Rule[] = [],
+  template = false,
+) {
   const { Workbook } = await import("exceljs");
   const book = new Workbook();
-  for (const [name, roots] of [
-    ["标签分类", true],
-    ["标签", false],
-  ] as const) {
-    const sheet = book.addWorksheet(name);
-    sheet.addRow(roots ? headers : [...headers, "分类ID", "分类名称"]);
-    for (const tag of template
-      ? []
-      : tags.filter(
-          (t) => (t.parentId === null) === roots && !t.locked,
-        ))
-      sheet.addRow([
-        tag.id,
-        tag.name,
-        tag.enabled ? "是" : "否",
-        tag.external ? "是" : "否",
-        ...(roots
-          ? []
-          : [
-              tag.parentId,
-              tags.find((t) => t.id === tag.parentId)?.name || "",
-            ]),
-      ]);
-    sheet.columns.forEach(
-      (col, i) => (col.width = i === 0 || i === 4 ? 42 : 24),
-    );
-    sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-    sheet.getRow(1).eachCell(
-      (c) =>
-        (c.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FF245AB5" },
-        }),
-    );
-    sheet.views = [{ state: "frozen", ySplit: 1 }];
-    sheet.autoFilter = { from: "A1", to: roots ? "D1" : "F1" };
-  }
+  const dimensions = tags.filter((t) => t.parentId === null);
+  const values = tags.filter((t) => t.parentId !== null);
+  const nameOf = (id?: string) => tags.find((t) => t.id === id)?.name || "";
+  const dimensionSheet = book.addWorksheet("维度");
+  dimensionSheet.addRow(dimensionHeaders);
+  for (const dimension of template ? [] : dimensions)
+    dimensionSheet.addRow([
+      dimension.id,
+      dimension.name,
+      KIND_LABEL[dimension.kind || "taxonomy"],
+      dimension.cardinality === "single" ? "单值" : "多值",
+      SCOPE_LABEL[dimension.scope || "material"],
+      AI_LABEL[dimension.ai || "closed"],
+      MERGE_LABEL[dimension.merge || "union"],
+      nameOf(dimension.fallbackId),
+      yesNo(dimension.humanEditable),
+    ]);
+  styleSheet(dimensionSheet, dimensionHeaders.length);
+  const valueSheet = book.addWorksheet("取值");
+  valueSheet.addRow(valueHeaders);
+  for (const value of template ? [] : values)
+    valueSheet.addRow([
+      value.id,
+      value.parentId,
+      nameOf(value.parentId || undefined),
+      value.name,
+      listCell(value.aliases),
+      value.order ?? "",
+      yesNo(value.derivedOnly),
+      yesNo(value.enabled),
+      yesNo(value.external),
+    ]);
+  styleSheet(valueSheet, valueHeaders.length);
+  const ruleSheet = book.addWorksheet("规则");
+  ruleSheet.addRow(ruleHeaders);
+  for (const rule of template ? [] : rules)
+    ruleSheet.addRow([
+      rule.id,
+      rule.name,
+      nameOf(rule.trigger.dimensionId),
+      listCell(
+        rule.trigger.valueIds.map((id) => nameOf(id)).filter(Boolean),
+      ),
+      MATCH_LABEL[rule.trigger.match],
+      nameOf(rule.action.dimensionId),
+      listCell(rule.action.valueIds.map((id) => nameOf(id)).filter(Boolean)),
+      rule.priority,
+      yesNo(rule.enabled),
+    ]);
+  styleSheet(ruleSheet, ruleHeaders.length);
   const buffer = await book.xlsx.writeBuffer();
   return new Blob([new Uint8Array(buffer)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
+}
+function assertHeader(
+  sheet: import("exceljs").Worksheet,
+  expected: string[],
+) {
+  if (expected.some((h, i) => sheet.getRow(1).getCell(i + 1).text !== h))
+    throw new Error(`${sheet.name} 表头不正确，请使用导入模板`);
 }
 export async function readTagWorkbook(
   buffer: ArrayBuffer,
@@ -93,40 +235,100 @@ export async function readTagWorkbook(
   const book = new Workbook();
   await book.xlsx.load(buffer);
   const rows: TagImportRow[] = [];
-  for (const name of ["标签分类", "标签"]) {
-    const sheet = book.getWorksheet(name);
-    if (!sheet) throw new Error(`缺少工作表：${name}`);
-    const expected =
-      name === "标签分类" ? headers : [...headers, "分类ID", "分类名称"];
-    if (expected.some((h, i) => sheet.getRow(1).getCell(i + 1).text !== h))
-      throw new Error(`${name} 表头不正确，请使用导入模板`);
+  const dimensionSheet = book.getWorksheet("维度");
+  const valueSheet = book.getWorksheet("取值");
+  const ruleSheet = book.getWorksheet("规则");
+  if (!dimensionSheet || !valueSheet)
+    throw new Error("缺少工作表：维度 / 取值");
+  assertHeader(dimensionSheet, dimensionHeaders);
+  assertHeader(valueSheet, valueHeaders);
+  const readRows = (
+    sheet: import("exceljs").Worksheet,
+    headers: string[],
+    build: (cells: string[], formula: boolean, index: number) => TagImportRow,
+  ) =>
     sheet.eachRow((row, index) => {
-      if (
-        index === 1 ||
-        row.values.toString().replaceAll(",", "").trim() === ""
-      )
-        return;
-      const values = expected.map((_, i) => row.getCell(i + 1).text.trim());
-      const invalid = [values[2], values[3]].some(
-        (v) => !["是", "否"].includes(v),
-      );
-      const formula = expected.some((_, i) => row.getCell(i + 1).type === 6);
-      rows.push({
-        sheet: name,
-        row: index,
-        id: values[0],
-        name: values[1],
-        enabled: values[2] === "是",
-        external: values[3] === "是",
-        parentId: values[4],
-        parentName: values[5],
-        error: formula
-          ? "请填写文本，不支持公式"
-          : invalid
-            ? "启用、对外展示须填写是或否"
-            : undefined,
-      });
+      if (index === 1) return;
+      const cells = headers.map((_, i) => row.getCell(i + 1).text.trim());
+      if (!cells.some(Boolean)) return;
+      const formula = headers.some((_, i) => row.getCell(i + 1).type === 6);
+      rows.push(build(cells, formula, index));
     });
+  readRows(dimensionSheet, dimensionHeaders, (cells, formula, index) => {
+    const invalid = !["是", "否"].includes(cells[8]);
+    return {
+      sheet: "维度",
+      row: index,
+      id: cells[0] || undefined,
+      name: cells[1],
+      // 维度禁止停用：导入一律视为启用。
+      enabled: true,
+      external: false,
+      kind: KIND_VALUE[cells[2] as keyof typeof KIND_VALUE],
+      cardinality: cells[3] === "单值" ? "single" : "multi",
+      scope: SCOPE_VALUE[cells[4]],
+      ai: AI_VALUE[cells[5]],
+      merge: MERGE_VALUE[cells[6]],
+      fallback: cells[7] || undefined,
+      humanEditable: cells[8] === "是",
+      error: formula
+        ? "请填写文本，不支持公式"
+        : invalid
+          ? "允许人工修改须填写是或否"
+          : !cells[1]
+            ? "维度名称必填"
+            : undefined,
+    };
+  });
+  readRows(valueSheet, valueHeaders, (cells, formula, index) => {
+    const aliases = parseAliasCell(cells[4] || "");
+    const invalid = [cells[7], cells[8]].some(
+      (value) => !["是", "否"].includes(value),
+    );
+    return {
+      sheet: "取值",
+      row: index,
+      id: cells[0] || undefined,
+      parentId: cells[1] || undefined,
+      parentName: cells[2] || undefined,
+      name: cells[3],
+      aliases,
+      order: cells[5] ? Number(cells[5]) : undefined,
+      derivedOnly: cells[6] === "是",
+      enabled: cells[7] === "是",
+      external: cells[8] === "是",
+      error: formula
+        ? "请填写文本，不支持公式"
+        : invalid
+          ? "启用、对外展示须填写是或否"
+          : !cells[3]
+            ? "取值名称必填"
+            : undefined,
+    };
+  });
+  if (ruleSheet) {
+    assertHeader(ruleSheet, ruleHeaders);
+    readRows(ruleSheet, ruleHeaders, (cells, formula, index) => ({
+      sheet: "规则",
+      row: index,
+      id: cells[0] || undefined,
+      name: cells[1],
+      enabled: cells[8] === "是",
+      external: false,
+      rule: {
+        triggerDimension: cells[2],
+        triggerValues: parseAliasCell(cells[3] || ""),
+        match: MATCH_VALUE[cells[4] || "任一命中"] || "any",
+        actionDimension: cells[5],
+        actionValues: parseAliasCell(cells[6] || ""),
+        priority: Number(cells[7] || 50),
+      },
+      error: formula
+        ? "请填写文本，不支持公式"
+        : !cells[1]
+          ? "规则名称必填"
+          : undefined,
+    }));
   }
   return rows;
 }
@@ -135,17 +337,29 @@ export function previewTagImport(
   input: TagImportRow[],
   decisions: Record<string, "keep" | "skip"> = {},
 ): TagImportPreview {
-  const tags = structuredClone(state.tags),
-    rows: TagImportPreview["rows"] = [],
-    seen = new Set<string>(),
-    changed: string[] = [];
+  const tags = structuredClone(state.tags);
+  const rules = structuredClone(state.rules || []);
+  const rows: TagImportPreview["rows"] = [];
+  const seen = new Set<string>();
+  const changed: string[] = [];
+  const changedRules: string[] = [];
   const assignedIds = new Map<string, string>();
+  const pendingFallback: { dimensionId: string; name: string; sheet: string; row: number }[] = [];
   let added = 0,
     updated = 0,
     unchanged = 0;
-  for (const row of [...input].sort(
-    (a, b) => Number(a.sheet === "标签") - Number(b.sheet === "标签"),
-  )) {
+  const dimensionByName = (name: string) =>
+    tags.find(
+      (t) => t.parentId === null && normalizeTagName(t.name) === normalizeTagName(name),
+    );
+  const valueByName = (dimensionId: string | undefined, name: string) =>
+    tags.find(
+      (t) =>
+        t.parentId === dimensionId &&
+        normalizeTagName(t.name) === normalizeTagName(name),
+    );
+  const order = { 维度: 0, 取值: 1, 规则: 2 } as const;
+  for (const row of [...input].sort((a, b) => order[a.sheet] - order[b.sheet])) {
     try {
       const decision = decisions[`${row.sheet}-${row.row}`];
       if (decision === "skip") {
@@ -159,18 +373,84 @@ export function previewTagImport(
         continue;
       }
       if (row.error) throw new Error(row.error);
-      const root = row.sheet === "标签分类";
-      const parent = root
+      if (row.sheet === "规则") {
+        const spec = row.rule!;
+        const triggerDimension =
+          dimensionByName(spec.triggerDimension) ||
+          tags.find((t) => t.id === spec.triggerDimension);
+        const actionDimension =
+          dimensionByName(spec.actionDimension) ||
+          tags.find((t) => t.id === spec.actionDimension);
+        if (!triggerDimension) throw new Error("触发维度不存在");
+        if (!actionDimension) throw new Error("目标维度不存在");
+        const triggerValues = spec.triggerValues.map((name) => {
+          const value = valueByName(triggerDimension.id, name);
+          if (!value) throw new Error(`触发取值不存在：${name}`);
+          return value.id;
+        });
+        const actionValues = spec.actionValues.map((name) => {
+          const value = valueByName(actionDimension.id, name);
+          if (!value) throw new Error(`结果取值不存在：${name}`);
+          return value.id;
+        });
+        if (!triggerValues.length) throw new Error("至少一个触发取值");
+        if (!actionValues.length) throw new Error("至少一个结果取值");
+        const old = row.id
+          ? rules.find((r) => r.id === row.id)
+          : rules.find((r) => r.name === row.name);
+        const priority = Number.isFinite(spec.priority) ? spec.priority : 50;
+        const clash = rules.find(
+          (r) =>
+            r.id !== old?.id &&
+            r.action.dimensionId === actionDimension.id &&
+            r.priority === priority,
+        );
+        if (clash)
+          throw new Error(
+            `同一目标维度的优先级不能重复：${priority}（${clash.name}）`,
+          );
+        const rule: Rule = {
+          id: old?.id || row.id || uid("rule"),
+          name: row.name,
+          enabled: row.enabled,
+          priority,
+          trigger: {
+            dimensionId: triggerDimension.id,
+            valueIds: triggerValues,
+            match: spec.match,
+          },
+          action: { dimensionId: actionDimension.id, valueIds: actionValues },
+        };
+        const same =
+          !!old &&
+          JSON.stringify({ ...old, id: "" }) ===
+            JSON.stringify({ ...rule, id: "" });
+        if (!old) {
+          rules.push(rule);
+          added++;
+        } else if (same) unchanged++;
+        else {
+          Object.assign(old, rule);
+          updated++;
+          changedRules.push(rule.id);
+        }
+        rows.push({
+          sheet: "规则",
+          row: row.row,
+          name: row.name,
+          action: !old ? "新增" : same ? "无变化" : "更新",
+          changes: old && !same ? "规则条件或结果有变化" : undefined,
+          decision,
+        });
+        continue;
+      }
+      const isDimension = row.sheet === "维度";
+      const parent = isDimension
         ? undefined
         : row.parentId
           ? tags.find((t) => t.id === row.parentId && t.parentId === null)
-          : tags.find(
-              (t) =>
-                t.parentId === null &&
-                normalizeTagName(t.name) ===
-                  normalizeTagName(row.parentName || ""),
-            );
-      if (!root && !parent) throw new Error("所属标签分类不存在");
+          : dimensionByName(row.parentName || "");
+      if (!isDimension && !parent) throw new Error("所属维度不存在");
       const old = row.id
         ? tags.find((t) => t.id === row.id)
         : tags.find(
@@ -178,31 +458,64 @@ export function previewTagImport(
               t.parentId === (parent?.id || null) &&
               normalizeTagName(t.name) === normalizeTagName(row.name),
           );
-      if (old && (old.parentId === null) !== root)
-        throw new Error("不能改变标签级别");
-      if (old?.locked)
-        throw new Error("系统预置标签不可通过导入修改或停用");
+      if (old && (old.parentId === null) !== isDimension)
+        throw new Error("不能改变维度与取值的层级");
+      if (isDimension && old && old.kind && row.kind && old.kind !== row.kind)
+        throw new Error("维度类型创建后不可修改");
+      const fallback = row.fallback
+        ? valueByName(parent?.id || old?.id, row.fallback) ||
+          tags.find((t) => t.id === row.fallback)
+        : undefined;
       const tag: Tag = {
+        ...(old || {}),
         id: old?.id || row.id || uid("tag"),
         name: row.name.trim(),
         parentId: parent?.id || null,
         enabled: row.enabled,
         external: row.external,
-        locked: old?.locked,
-        manualOnly: old?.manualOnly,
+        aliases: isDimension
+          ? undefined
+          : row.aliases?.length
+            ? row.aliases
+            : undefined,
+        ...(isDimension
+          ? {
+              kind: row.kind || "taxonomy",
+              cardinality: row.cardinality || "multi",
+              scope: row.scope || "material",
+              ai: row.ai || "closed",
+              merge: row.merge || "union",
+              fallbackId: fallback?.id,
+              humanEditable: row.humanEditable,
+            }
+          : {
+              derivedOnly: row.derivedOnly || undefined,
+              order: Number.isFinite(row.order) ? row.order : old?.order,
+            }),
       };
-      if (seen.has(tag.id)) throw new Error("文件中存在重复标签");
+      // 兜底值可能写在后面的"取值"表里，先记下来，整轮处理完再解析。
+      if (isDimension && row.fallback && !fallback)
+        pendingFallback.push({
+          dimensionId: tag.id,
+          name: row.fallback,
+          sheet: row.sheet,
+          row: row.row,
+        });
+      if (seen.has(tag.id)) throw new Error("文件中存在重复取值");
       seen.add(tag.id);
-      const error = validateTag(tags, tag);
-      if (error) throw new Error(error);
+      if (!isDimension) {
+        const error = validateTag(tags, tag);
+        if (error) throw new Error(error);
+      }
       const same =
         old &&
-        ["name", "parentId", "enabled", "external"].every(
+        ["name", "parentId", "enabled", "external", "kind", "cardinality", "ai"].every(
           (key) => old[key as keyof Tag] === tag[key as keyof Tag],
-        );
+        ) &&
+        JSON.stringify(old.aliases || []) === JSON.stringify(tag.aliases || []);
       const action = !old ? "新增" : same ? "无变化" : "更新";
       const similar =
-        !old || old.name !== tag.name || old.parentId !== tag.parentId
+        !isDimension && (!old || old.name !== tag.name || old.parentId !== tag.parentId)
           ? similarTags(tags, tag).map((x) => x.tag)
           : [];
       const changes =
@@ -243,8 +556,23 @@ export function previewTagImport(
       });
     }
   }
+  for (const pending of pendingFallback) {
+    const value = valueByName(pending.dimensionId, pending.name);
+    const dimension = tags.find((t) => t.id === pending.dimensionId);
+    if (value && dimension) dimension.fallbackId = value.id;
+    else {
+      const entry = rows.find(
+        (r) => r.sheet === pending.sheet && r.row === pending.row,
+      );
+      if (entry) {
+        entry.action = "错误";
+        entry.error = `兜底值不存在：${pending.name}`;
+      }
+    }
+  }
   return {
     tags,
+    rules,
     input: input.map((row) => ({
       ...structuredClone(row),
       id: assignedIds.get(`${row.sheet}-${row.row}`) || row.id,
@@ -254,8 +582,16 @@ export function previewTagImport(
     added,
     updated,
     unchanged,
-    affected: tagUsage(state, changed),
-    baseline: JSON.stringify(state.tags),
+    affected:
+      tagUsage(state, changed) +
+      changedRules.reduce(
+        (total, id) => {
+          const rule = rules.find((r) => r.id === id);
+          return total + (rule ? ruleImpact(state, rule).length : 0);
+        },
+        0,
+      ),
+    baseline: JSON.stringify({ tags: state.tags, rules: state.rules }),
   };
 }
 export function applyTagImport(s: State, preview: TagImportPreview) {
@@ -263,7 +599,7 @@ export function applyTagImport(s: State, preview: TagImportPreview) {
     role = s.roles.find((r) => r.id === user?.roleId);
   if (!user || !canRole(role, "taxonomy")) throw new Error("没有标签管理权限");
   if (preview.rows.some((r) => r.error)) throw new Error("请先修正导入错误");
-  if (JSON.stringify(s.tags) !== preview.baseline)
+  if (JSON.stringify({ tags: s.tags, rules: s.rules }) !== preview.baseline)
     throw new Error("标签库已变化，请重新导入预览");
   const checked = previewTagImport(s, preview.input, preview.decisions);
   if (checked.rows.some((r) => r.error)) throw new Error("请先修正导入错误");
@@ -280,4 +616,7 @@ export function applyTagImport(s: State, preview: TagImportPreview) {
   )
     captureBindingNames(s);
   s.tags = structuredClone(checked.tags);
+  s.rules = structuredClone(checked.rules);
+  // 与界面保存一致：规则变化后立即重算当前版本（幂等，只动规则产物）。
+  recalcRules(s);
 }

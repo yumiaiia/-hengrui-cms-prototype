@@ -4,3 +4,6 @@ dist/
 tests/*.png
 tests/*.zip
 tests/*.csv
+
+# local agent workspace
+.workbuddy/

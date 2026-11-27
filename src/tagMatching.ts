@@ -9,6 +9,7 @@ import {
   type Task,
   type Version,
   type Binding,
+  type Rule,
   visibleFor,
 } from "./model";
 import {
@@ -19,7 +20,14 @@ import {
   suggestionContexts,
 } from "./taxonomy";
 import { paginated } from "./workflow";
-import { applyDerivedTags, exclusionMatches, stampBinding, tagDefinitions } from "./tagResults";
+import {
+  applyRules,
+  enforceSingleValue,
+  exclusionMatches,
+  stampBinding,
+  tagDefinitions,
+  tagHitsText,
+} from "./tagResults";
 
 export function tagUsage(state: State, ids: string[]) {
   const all = new Set(
@@ -37,11 +45,23 @@ export function tagImpact(previous: Tag, next: Tag) {
     previous.name !== next.name &&
       "下次匹配结果使用新名称，确认更新后保存到内容",
     previous.parentId !== next.parentId &&
-      "下次标签结果按新分类展示，已有绑定保留",
+      "下次标签结果按新维度展示，已有绑定保留",
     previous.enabled !== next.enabled &&
       (next.enabled ? "可用于新增匹配" : "停止新增绑定，已有绑定保留"),
     previous.external !== next.external &&
       (next.external ? "允许对外展示" : "停止对外展示"),
+    JSON.stringify(previous.aliases || []) !==
+      JSON.stringify(next.aliases || []) && "别名（通用名等）参与下次自动匹配",
+    previous.derivedOnly !== next.derivedOnly &&
+      (next.derivedOnly
+        ? "本取值改为仅由规则产生，AI 与人工不再直接添加"
+        : "本取值恢复可由 AI 匹配与人工添加"),
+    previous.cardinality !== next.cardinality &&
+      (next.cardinality === "single"
+        ? "同一位置该维度仅保留一个取值，已有绑定按规则保留一个"
+        : "同一位置该维度恢复允许多个取值"),
+    previous.ai !== next.ai &&
+      `AI 匹配范围改为 ${next.ai === "none" ? "不参与" : next.ai === "open" ? "开放（可产生新词）" : "闭集"}`,
   ].filter(Boolean) as string[];
 }
 export const matchableAssets = (s: State) => {
@@ -63,49 +83,64 @@ function assertMatching(s: State) {
     throw new Error("重新匹配需要标签管理与内容标签维护权限");
   return actor;
 }
-export function matchingResult(v: Version, tags: Tag[]) {
+export function matchingResult(
+  version: Version,
+  tags: Tag[],
+  rules: Rule[] = [],
+): Version {
   if (
-    v.process !== "完成" ||
-    Object.values(v.pageStates || {}).some(
+    version.process !== "完成" ||
+    Object.values(version.pageStates || {}).some(
       (p) => !["完成", "人工完成"].includes(p.status),
     )
   )
     throw new Error("请先完成文件解析，再匹配标签。");
   const eligible = tags.filter((t) => t.parentId && aiEligibleTag(tags, t));
   // Existing bindings survive; matching only fills unbound positions.
-  const result: Binding[] = v.tags.map((b) => {
-    const tag = tags.find((t) => t.id === b.tagId);
-    return tag ? stampBinding(b, tags) : structuredClone(b);
-  });
+  const draft: Version = {
+    ...version,
+    tags: version.tags.map((b) => {
+      const tag = tags.find((t) => t.id === b.tagId);
+      return tag ? stampBinding(b, tags) : structuredClone(b);
+    }),
+  };
   const hasBinding = (tag: Tag, page?: number) =>
-    result.some((b) => b.tagId === tag.id && b.page === page);
+    draft.tags.some((b) => b.tagId === tag.id && b.page === page);
   const add = (tag: Tag, page?: number) => {
     if (
-      v.tagExclusions?.some((e) =>
-        exclusionMatches(e, { name: tag.name, parentId: tag.parentId! }, page),
+      version.tagExclusions?.some((e) =>
+        exclusionMatches(
+          e,
+          { valueId: tag.id, name: tag.name, parentId: tag.parentId! },
+          page,
+        ),
       )
     )
       return;
     if (!hasBinding(tag, page))
-      result.push(stampBinding({ tagId: tag.id, origin: "AI", page }, tags));
+      draft.tags.push(
+        stampBinding({ tagId: tag.id, origin: "AI", page }, tags),
+      );
   };
+  // 命中条件：标签名 ∪ 别名（如产品通用名）任一词命中正文。
   const text = (value: string) =>
     value.normalize("NFKC").trim().toLocaleLowerCase();
   for (const tag of eligible) {
-    const name = text(tag.name);
-    if (!name) continue;
     if (
       !hasBinding(tag) &&
-      text([v.title, v.summary, ...v.content].join(" ")).includes(name)
+      tagHitsText(tag, text([version.title, version.summary, ...version.content].join(" ")))
     )
       add(tag);
-    if (paginated(v))
-      v.content.slice(0, v.pages).forEach((body, i) => {
-        if (!hasBinding(tag, i + 1) && text(body).includes(name))
+    if (paginated(version))
+      version.content.slice(0, version.pages).forEach((body, i) => {
+        if (!hasBinding(tag, i + 1) && tagHitsText(tag, text(body)))
           add(tag, i + 1);
       });
   }
-  return applyDerivedTags(result, v.tagExclusions, tags);
+  // 单值维度收敛后，交给规则引擎统一推导（规则只读 AI 与人工结果，不自我触发）。
+  draft.tags = enforceSingleValue(draft.tags, tags);
+  applyRules(draft, tags, rules);
+  return draft;
 }
 function matchingRecommendations(s: State, asset: State["assets"][number]) {
   return pendingRecommendationsForVersion(s, asset).flatMap((r) =>
@@ -148,6 +183,8 @@ export function startTagMatching(s: State, ids?: string[]) {
     ownerId: actor.id,
     createdAt: now(),
     tagSnapshot: snapshot,
+    // 批次内一致：规则在发起时冻结，之后改规则不影响本批。
+    ruleSnapshot: structuredClone(s.rules),
     items: assets.map((a) => {
       const v = structuredClone(current(a));
       for (const r of s.suggestions) {
@@ -238,12 +275,13 @@ export function advanceTagMatching(s: State, task: Task) {
           throw new Error("标签库已更新，请重新同步本文件。");
         const source = structuredClone(current(a));
         source.tagExclusions = structuredClone(item.v.tagExclusions);
-        const next = matchingResult(source, tags);
-        item.v = { ...source, tags: next, tagStatus: "已完成" };
+        const rules = batch.ruleSnapshot || s.rules;
+        const next = matchingResult(source, tags, rules);
+        item.v = { ...next, tagStatus: "已完成" };
         // Existing known recommendations may be resolved by an actual new match.
         for (const r of item.recommendations || []) {
           if (
-            next.some(
+            next.tags.some(
               (b) =>
                 b.page === r.page &&
                 tags.some(

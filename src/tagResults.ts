@@ -1,4 +1,12 @@
-import type { Binding, Tag, TagExclusion, Version, State } from "./model";
+import {
+  VISIBILITY_FIELD,
+  type Binding,
+  type Rule,
+  type Tag,
+  type TagExclusion,
+  type Version,
+  type State,
+} from "./model";
 
 export const normalizeName = (name: string) =>
   name.normalize("NFKC").trim().toLocaleLowerCase();
@@ -21,14 +29,24 @@ export function captureBindingNames(state: State) {
     for (const v of asset.versions)
       v.tags = v.tags.map((b) => (b.name ? b : stampBinding(b, state.tags)));
 }
+// 快照比对覆盖维度属性：基数 / AI 范围 / 合并策略变了也要提示重新同步。
 export function tagDefinitions(tags: Tag[]) {
   return JSON.stringify(
     tags
-      .map(({ id, name, parentId, enabled }) => ({
-        id,
-        name,
-        parentId,
-        enabled,
+      .map((t) => ({
+        id: t.id,
+        name: t.name,
+        parentId: t.parentId,
+        enabled: t.enabled,
+        aliases: [...(t.aliases || [])].sort(),
+        derivedOnly: t.derivedOnly,
+        kind: t.kind,
+        cardinality: t.cardinality,
+        scope: t.scope,
+        ai: t.ai,
+        merge: t.merge,
+        fallbackId: t.fallbackId,
+        humanEditable: t.humanEditable,
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
   );
@@ -39,28 +57,35 @@ export function boundDefinitions(version: Version, tags: Tag[]) {
     if (ids.has(tag.id) && tag.parentId) ids.add(tag.parentId);
   return tagDefinitions(tags.filter((t) => ids.has(t.id)));
 }
+interface ExclusionTarget {
+  valueId?: string;
+  name?: string;
+  parentId?: string;
+}
 export const exclusionMatches = (
   e: TagExclusion,
-  draft: { name: string; parentId: string },
+  target: ExclusionTarget,
   page?: number,
-) =>
-  normalizeName(e.name) === normalizeName(draft.name) &&
-  e.parentId === draft.parentId &&
-  e.page === page;
+) => {
+  const same = e.valueId
+    ? e.valueId === target.valueId
+    : !!e.name &&
+      e.name === target.name &&
+      (e.parentId || "") === (target.parentId || "");
+  return same && e.page === page;
+};
 export function excludeTag(
   version: Version,
-  draft: { name: string; parentId: string },
+  target: ExclusionTarget,
   page?: number,
 ) {
-  const entry = { name: draft.name, parentId: draft.parentId, page };
-  if (!version.tagExclusions?.some((e) => exclusionMatches(e, draft, page)))
-    (version.tagExclusions ||= []).push(entry);
+  if (!version.tagExclusions?.some((e) => exclusionMatches(e, target, page)))
+    (version.tagExclusions ||= []).push({ ...target, page });
 }
 export function allowTag(version: Version, tag: Tag, page?: number) {
   if (!tag.parentId) return;
   version.tagExclusions = version.tagExclusions?.filter(
-    (e) =>
-      !exclusionMatches(e, { name: tag.name, parentId: tag.parentId! }, page),
+    (e) => !exclusionMatches(e, { valueId: tag.id }, page),
   );
 }
 export function maintainBindings(
@@ -71,12 +96,16 @@ export function maintainBindings(
   for (const removed of version.tags.filter(
     (old) => !next.some((b) => samePosition(b, old)),
   )) {
+    // 人工移除的取值记入排除记忆（含规则派生值），避免被规则重新补回。
     const tag = tags.find((t) => t.id === removed.tagId);
-    const parentId = removed.parentId || tag?.parentId;
-    if (parentId && (removed.name || tag?.name))
+    if (tag)
       excludeTag(
         version,
-        { name: removed.name || tag!.name, parentId },
+        {
+          valueId: tag.id,
+          name: removed.name || tag.name,
+          parentId: tag.parentId || undefined,
+        },
         removed.page,
       );
   }
@@ -87,55 +116,194 @@ export function maintainBindings(
     return stampBinding(b, tags);
   });
 }
-// 材料级自动派生：整份内容（材料级 ∪ 全部页级）命中触发集合时，在材料级补充派生目标标签。
-// 派生目标仅由派生规则或人工产生，AI 直出在落库前被拦截；人工移除后记入排除记忆不再补回。
-export const DERIVATION_RULES: {
-  triggers: string[];
-  derived: string[];
-}[] = [
-  {
-    triggers: ["指南共识", "临床研究", "综述与前沿", "疾病知识与患教"],
-    derived: ["All三类用户"],
-  },
-  {
-    triggers: ["治疗方案", "病例分享", "产品准入", "用药安全"],
-    derived: ["已注册待认证", "已认证"],
-  },
-];
-const derivedTargetNames = new Set(
-  DERIVATION_RULES.flatMap((rule) => rule.derived).map(normalizeName),
-);
-export function applyDerivedTags(
-  bindings: Binding[],
-  tagExclusions: TagExclusion[] | undefined,
-  tags: Tag[],
+// 打标命中词：标签名 ∪ 别名（如产品通用名），统一 NFKC 归一小写。
+export const matchTerms = (tag: Tag) =>
+  [tag.name, ...(tag.aliases || [])]
+    .map((term) => normalizeName(term))
+    .filter(Boolean);
+export function tagHitsText(tag: Tag, normalizedText: string) {
+  return matchTerms(tag).some((term) => normalizedText.includes(term));
+}
+export const dimensionOf = (b: Binding, tags: Tag[]) =>
+  b.parentId || tags.find((t) => t.id === b.tagId)?.parentId;
+// 单值维度：同一位置只保留一个取值。人工 > 规则 > AI；
+// 同来源按取值排序 order 升序，order 相同按名称，保证结果确定且可解释。
+const originRank = (origin: Binding["origin"]) =>
+  origin === "人工" ? 1000 : origin === "规则" ? 500 : 0;
+export function enforceSingleValue(bindings: Binding[], tags: Tag[]) {
+  const single = new Set(
+    tags
+      .filter((t) => !t.parentId && t.cardinality === "single")
+      .map((t) => t.id),
+  );
+  if (!single.size) return bindings;
+  const orderOf = (b: Binding) => tags.find((t) => t.id === b.tagId);
+  const better = (a: Binding, b: Binding) => {
+    const rank = originRank(a.origin) - originRank(b.origin);
+    if (rank !== 0) return rank > 0;
+    const left = orderOf(a),
+      right = orderOf(b);
+    const leftOrder = left?.order ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = right?.order ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder < rightOrder;
+    return (left?.name || "").localeCompare(right?.name || "", "zh") < 0;
+  };
+  const kept: Binding[] = [];
+  for (const b of bindings) {
+    const dim = dimensionOf(b, tags);
+    if (!dim || !single.has(dim)) {
+      kept.push(b);
+      continue;
+    }
+    const index = kept.findIndex(
+      (x) => x.page === b.page && dimensionOf(x, tags) === dim,
+    );
+    if (index < 0) {
+      kept.push(b);
+      continue;
+    }
+    if (better(b, kept[index])) kept[index] = b;
+  }
+  return kept;
+}
+function triggerSet(
+  version: Pick<Version, "tags" | "fields" | "fieldsManual">,
 ) {
-  const nameOf = (id: string) =>
-    tags.find((t) => t.id === id)?.name || "";
-  const present = new Set(bindings.map((b) => normalizeName(nameOf(b.tagId))));
-  const result = [...bindings];
-  for (const rule of DERIVATION_RULES) {
-    if (!rule.triggers.some((t) => present.has(normalizeName(t)))) continue;
-    for (const name of rule.derived) {
-      const target = tags.find(
-        (t) =>
-          t.parentId &&
-          normalizeName(t.name) === normalizeName(name) &&
-          t.enabled,
+  const ids = new Set(
+    version.tags.filter((b) => b.origin !== "规则").map((b) => b.tagId),
+  );
+  for (const [dim, list] of Object.entries(version.fields || {}))
+    if ((version.fieldsManual || []).includes(dim))
+      for (const id of list) ids.add(id);
+  return ids;
+}
+function triggerHits(rule: Rule, ids: Set<string>) {
+  return rule.trigger.match === "all"
+    ? rule.trigger.valueIds.every((id) => ids.has(id))
+    : rule.trigger.valueIds.some((id) => ids.has(id));
+}
+export function ruleMatches(
+  rule: Rule,
+  version: Pick<Version, "tags" | "fields" | "fieldsManual">,
+) {
+  return triggerHits(rule, triggerSet(version));
+}
+/** 某个目标维度的规则结果：并集维度取全部命中规则的并集，优先级维度取最高优先级的一条。 */
+export function resolveRule(
+  version: Pick<Version, "tags" | "fields" | "fieldsManual">,
+  dimensionId: string,
+  tags: Tag[],
+  rules: Rule[],
+) {
+  const matching = rules
+    .filter(
+      (r) =>
+        r.enabled &&
+        r.action.dimensionId === dimensionId &&
+        r.trigger.valueIds.length > 0 &&
+        ruleMatches(r, version),
+    )
+    .sort((a, b) => a.priority - b.priority);
+  if (!matching.length) return { valueIds: [] as string[], ruleId: undefined };
+  const dimension = tags.find((t) => t.id === dimensionId);
+  if (dimension?.merge === "priority")
+    return {
+      valueIds: [...matching[0].action.valueIds],
+      ruleId: matching[0].id,
+    };
+  return {
+    valueIds: [...new Set(matching.flatMap((r) => r.action.valueIds))],
+    ruleId: matching[0].id,
+  };
+}
+/**
+ * 重算规则产物，幂等：
+ * 1) 清空上一轮规则绑定与规则字段值；
+ * 2) 按维度求值，人工改过的维度不覆盖；
+ * 3) 枚举字段落 fields，分类维度落 tags（origin=规则，带 ruleId）；
+ * 4) 无规则命中的枚举字段落兜底档；最后收敛单值维度。
+ */
+export function applyRules(version: Version, tags: Tag[], rules: Rule[]) {
+  version.tags = version.tags.filter((b) => b.origin !== "规则");
+  const manual = new Set(version.fieldsManual || []);
+  const next: Record<string, string[]> = {};
+  for (const [dim, list] of Object.entries(version.fields || {}))
+    if (manual.has(dim)) next[dim] = [...list];
+  for (const dimension of tags.filter((t) => !t.parentId && t.enabled)) {
+    const result = resolveRule(version, dimension.id, tags, rules);
+    const humanValue =
+      manual.has(dimension.id) ||
+      version.tags.some(
+        (b) =>
+          !b.page &&
+          b.origin === "人工" &&
+          dimensionOf(b, tags) === dimension.id,
       );
-      if (!target) continue;
+    if (!result.valueIds.length) {
       if (
-        tagExclusions?.some((e) =>
-          exclusionMatches(e, {
-            name: target.name,
-            parentId: target.parentId!,
-          }),
+        dimension.kind === "enum" &&
+        !humanValue &&
+        dimension.fallbackId &&
+        tags.some((t) => t.id === dimension.fallbackId && t.enabled)
+      )
+        next[dimension.id] = [dimension.fallbackId];
+      continue;
+    }
+    if (humanValue && dimension.humanEditable) continue;
+    if (dimension.kind === "enum") {
+      const values = result.valueIds.filter((id) =>
+        tags.some((t) => t.id === id && t.enabled),
+      );
+      if (values.length)
+        next[dimension.id] = [...new Set(values)].slice(
+          0,
+          dimension.cardinality === "single" ? 1 : values.length,
+        );
+      continue;
+    }
+    for (const id of result.valueIds) {
+      const value = tags.find((t) => t.id === id);
+      if (!value?.enabled) continue;
+      if (
+        version.tagExclusions?.some((e) =>
+          exclusionMatches(
+            e,
+            { valueId: value.id, name: value.name, parentId: value.parentId! },
+            undefined,
+          ),
         )
       )
         continue;
-      if (!result.some((b) => b.tagId === target.id && !b.page))
-        result.push(stampBinding({ tagId: target.id, origin: "人工" }, tags));
+      if (version.tags.some((b) => b.tagId === id && !b.page)) continue;
+      version.tags.push(
+        stampBinding(
+          { tagId: id, origin: "规则", ruleId: result.ruleId },
+          tags,
+        ),
+      );
     }
   }
-  return result;
+  version.fields = Object.keys(next).length ? next : undefined;
+  version.tags = enforceSingleValue(version.tags, tags);
+}
+/** 用户可见范围：按字段取值的配置顺序返回名称，供列表 / 详情 / 导出统一读取。 */
+export function audiencesOf(
+  version: Pick<Version, "fields">,
+  tags: Tag[],
+): string[] {
+  const ids = version.fields?.[VISIBILITY_FIELD] || [];
+  return tags
+    .filter((t) => t.parentId === VISIBILITY_FIELD)
+    .sort((a, b) => (a.order || 0) - (b.order || 0))
+    .filter((t) => ids.includes(t.id))
+    .map((t) => t.name);
+}
+export function fieldValuesOf(
+  version: Pick<Version, "fields">,
+  tags: Tag[],
+  dimensionId: string,
+) {
+  return (version.fields?.[dimensionId] || [])
+    .map((id) => tags.find((t) => t.id === id))
+    .filter((t): t is Tag => !!t);
 }
