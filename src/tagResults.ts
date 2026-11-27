@@ -29,6 +29,9 @@ export function captureBindingNames(state: State) {
     for (const v of asset.versions)
       v.tags = v.tags.map((b) => (b.name ? b : stampBinding(b, state.tags)));
 }
+/** 来源只靠颜色区分：AI 蓝、人工琥珀、规则紫。确认页与归档后共用同一套。 */
+export const originClass = (origin?: Binding["origin"]) =>
+  origin === "人工" ? "manual" : origin === "规则" ? "rule" : "ai";
 // 快照比对覆盖维度属性：基数 / AI 范围 / 合并策略变了也要提示重新同步。
 export function tagDefinitions(tags: Tag[]) {
   return JSON.stringify(

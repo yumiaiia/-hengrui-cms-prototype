@@ -18,14 +18,18 @@ import {
   X,
 } from "lucide-react";
 import { CancelBatch } from "../components/CancelBatch";
-import { applyRules, bindingName, boundDefinitions } from "../tagResults";
+import {
+  applyRules,
+  bindingName,
+  boundDefinitions,
+  originClass,
+} from "../tagResults";
 import { useCMS } from "../store";
 import {
   archiveStaged,
   activeItem,
   confirmStaged,
   patchStaged,
-  rebaseStaged,
   retryStaged,
   reviewProblems,
   visibleBatches,
@@ -547,25 +551,6 @@ function ReviewFile({
           />
         </div>
       </header>
-      {item.targetId &&
-      activeItem(item) &&
-      (target?.current !== item.baseVersion ||
-        (tagsOnly && problems.some((p) => /已变化/.test(p)))) ? (
-        <div className="confirmation-alert">
-          <strong>
-            {tagsOnly
-              ? "内容已变化，请重新同步本文件。"
-              : "当前正式版本已变化，请核对本次更新目标。"}
-          </strong>
-          <Button
-            onClick={() =>
-              run((s) => rebaseStaged(s, batchId, item.id), "重新核对版本目标")
-            }
-          >
-            {tagsOnly ? "重新同步本文件" : "按最新版本重新核对"}
-          </Button>
-        </div>
-      ) : null}
       {pending ? (
         <div className="confirmation-processing">
           <Clock3 size={18} />
@@ -892,12 +877,52 @@ function ReviewTags({
   const { checkTag, similarityDialog } = useTagCheck();
   const currentPage = scope === "page" ? page : undefined;
   const bindings = item.v.tags.filter((b) => b.page === currentPage);
+  const enumFields = state.tags.filter((t) => !t.parentId && t.kind === "enum");
+  const fieldGroups = enumFields
+    .map((field) => ({
+      field,
+      values: (item.v.fields?.[field.id] || [])
+        .map((valueId) => state.tags.find((t) => t.id === valueId))
+        .filter((tag): tag is (typeof state.tags)[number] => !!tag),
+    }))
+    .filter((group) => group.values.length);
+  function setFieldValues(fieldId: string, ids: string[]) {
+    const nextFields = { ...(item.v.fields || {}), [fieldId]: ids };
+    const nextManual = [...new Set([...(item.v.fieldsManual || []), fieldId])];
+    patch({ fields: nextFields, fieldsManual: nextManual });
+  }
+  function clearField(fieldId: string) {
+    const nextFields = { ...(item.v.fields || {}) };
+    delete nextFields[fieldId];
+    patch({
+      fields: nextFields,
+      fieldsManual: (item.v.fieldsManual || []).filter((d) => d !== fieldId),
+    });
+  }
   const batch = state.uploadBatches?.find((b) => b.id === batchId);
+  const tagsOnly = batch?.kind === "tags";
+  // 标签更新批次：对比批次基准版本，标出本次新增/移除的标签。
+  const baselineTags = (() => {
+    if (!tagsOnly || !item.baseline) return [] as typeof item.v.tags;
+    try {
+      return (JSON.parse(item.baseline) as { tags?: typeof item.v.tags }).tags || [];
+    } catch {
+      return [] as typeof item.v.tags;
+    }
+  })();
+  const changeKey = (b: { tagId: string; page?: number }) =>
+    `${b.tagId}:${b.page ?? "m"}`;
+  const baselineKeys = new Set(baselineTags.map(changeKey));
+  const currentKeys = new Set(item.v.tags.map(changeKey));
+  const addedKeys = new Set(
+    item.v.tags.filter((b) => !baselineKeys.has(changeKey(b))).map(changeKey),
+  );
+  const addedCount = addedKeys.size;
+  const removedTags = baselineTags.filter((b) => !currentKeys.has(changeKey(b)));
   const activeRules =
     batch?.kind === "tags" && batch.ruleSnapshot
       ? batch.ruleSnapshot
       : state.rules;
-  const enumFields = state.tags.filter((t) => !t.parentId && t.kind === "enum");
   const activeRecommendation = item.recommendations?.find(
     (r) => r.id === recommendation,
   );
@@ -908,6 +933,22 @@ function ReviewTags({
       (!activeRecommendation || t.parentId === activeRecommendation.parentId) &&
       t.name.toLowerCase().includes(query.toLowerCase()),
   );
+  const fieldCandidates =
+    scope === "page"
+      ? []
+      : enumFields
+          .filter((field) => field.humanEditable !== false)
+          .flatMap((field) =>
+            state.tags
+              .filter(
+                (t) =>
+                  t.parentId === field.id &&
+                  t.enabled &&
+                  !(item.v.fields?.[field.id] || []).includes(t.id) &&
+                  t.name.toLowerCase().includes(query.toLowerCase()),
+              )
+              .map((value) => ({ field, value })),
+          );
   const groups = state.tags
     .filter((t) => t.parentId === null)
     .map((root) => ({
@@ -1029,108 +1070,16 @@ function ReviewTags({
     <aside className="confirmation-tag-panel">
       <div className="confirmation-tag-panel-title">
         <Tags size={16} />
-        <h3>标签核对</h3>
-        <span>{item.v.tags.length} 个</span>
+        <h3>标签与属性</h3>
+        <span>
+          {item.v.tags.length} 标签 · {enumFields.length} 属性
+          {tagsOnly && (addedCount || removedTags.length)
+            ? ` · 本次 +${addedCount} −${removedTags.length}`
+            : ""}
+        </span>
       </div>
       <fieldset disabled={disabled}>
-        {enumFields.length ? (
-          <div className="confirmation-fields">
-            {enumFields.map((field) => {
-              const selectedIds = item.v.fields?.[field.id] || [];
-              const isManual = !!item.v.fieldsManual?.includes(field.id);
-              const fieldValues = state.tags
-                .filter((t) => t.parentId === field.id && t.enabled)
-                .sort((a, b) => (a.order || 0) - (b.order || 0));
-              const suggestedIds = (() => {
-                const probe = structuredClone(item.v);
-                probe.fieldsManual = (probe.fieldsManual || []).filter(
-                  (d) => d !== field.id,
-                );
-                applyRules(probe, state.tags, activeRules);
-                return probe.fields?.[field.id] || [];
-              })();
-              const sameAsRule =
-                JSON.stringify([...selectedIds].sort()) ===
-                JSON.stringify([...suggestedIds].sort());
-              const labelOf = (ids: string[]) =>
-                field.id === VISIBILITY_FIELD
-                  ? audienceLabel(
-                      ids
-                        .map(
-                          (vid) => state.tags.find((t) => t.id === vid)?.name,
-                        )
-                        .filter(Boolean) as string[],
-                      fieldValues.length,
-                    )
-                  : ids
-                      .map((vid) => state.tags.find((t) => t.id === vid)?.name)
-                      .filter(Boolean)
-                      .join("、") || "未设置";
-              const updateField = (nextIds?: string[]) => {
-                const nextFields = { ...(item.v.fields || {}) };
-                let nextManual = [...(item.v.fieldsManual || [])];
-                if (nextIds === undefined) {
-                  nextManual = nextManual.filter((d) => d !== field.id);
-                  delete nextFields[field.id];
-                } else {
-                  nextFields[field.id] = nextIds;
-                  if (!nextManual.includes(field.id)) nextManual.push(field.id);
-                }
-                patch({ fields: nextFields, fieldsManual: nextManual });
-              };
-              return (
-                <div className="confirmation-field-row" key={field.id}>
-                  <div className="confirmation-field-head">
-                    <strong>{field.name}</strong>
-                    <small className="muted">
-                      {isManual ? "人工设置" : "按规则推导"}
-                    </small>
-                    {isManual && !sameAsRule ? (
-                      <small className="muted">
-                        规则建议：{labelOf(suggestedIds)}
-                      </small>
-                    ) : null}
-                    {isManual && field.humanEditable !== false ? (
-                      <button
-                        type="button"
-                        className="text-link"
-                        onClick={() => updateField(undefined)}
-                      >
-                        恢复按规则
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="confirmation-field-options">
-                    {fieldValues.map((opt) => {
-                      const checked = selectedIds.includes(opt.id);
-                      return (
-                        <label key={opt.id} className="actions">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={disabled || field.humanEditable === false}
-                            onChange={(e) => {
-                              if (field.cardinality === "single") {
-                                updateField(e.target.checked ? [opt.id] : []);
-                              } else {
-                                updateField(
-                                  e.target.checked
-                                    ? [...selectedIds, opt.id]
-                                    : selectedIds.filter((x) => x !== opt.id),
-                                );
-                              }
-                            }}
-                          />
-                          {opt.name}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+        <div className="confirmation-section-label">标签</div>
         <div
           className="confirmation-scope"
           role="tablist"
@@ -1180,8 +1129,54 @@ function ReviewTags({
           </div>
         ) : null}
         <div className="confirmation-bound-tags">
+          {scope === "material"
+            ? fieldGroups.map(({ field, values }) => {
+                const manual = !!item.v.fieldsManual?.includes(field.id);
+                return (
+                  <section className="tag-family" key={field.id}>
+                    <h4>
+                      {field.name}
+                      {manual ? <small>人工</small> : null}
+                      {manual && field.humanEditable !== false ? (
+                        <button
+                          type="button"
+                          className="text-link"
+                          onClick={() => clearField(field.id)}
+                        >
+                          恢复
+                        </button>
+                      ) : null}
+                    </h4>
+                    <div className="tag-chips">
+                      {values.map((value) => (
+                        <span
+                          key={value.id}
+                          className={`tag-chip ${manual ? "manual" : "rule"}`}
+                        >
+                          {value.name}
+                          <button
+                            aria-label={`移除${value.name}`}
+                            disabled={disabled || field.humanEditable === false}
+                            onClick={() =>
+                              setFieldValues(
+                                field.id,
+                                values
+                                  .filter((x) => x.id !== value.id)
+                                  .map((x) => x.id),
+                              )
+                            }
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })
+            : null}
           {groups.map(({ root, tags }) => (
-            <section key={root.id}>
+            <section className="tag-family" key={root.id}>
               <h4>{root.name}</h4>
               <div>
                 {tags.map((b) => {
@@ -1196,14 +1191,16 @@ function ReviewTags({
                       title={
                         ruleName ? `规则派生：${ruleName}` : undefined
                       }
-                      className={`confirmation-tag ${tag && availableTag(state.tags, tag) ? "" : "is-invalid"}`}
+                      className={`tag-chip ${originClass(b.origin)} ${tag && availableTag(state.tags, tag) ? "" : "is-invalid"}`}
                     >
                       <span>
                         {bindingName(b, state.tags)}
+                        {tagsOnly && addedKeys.has(`${b.tagId}:${b.page ?? "m"}`) ? (
+                          <small className="tag-added">新增</small>
+                        ) : null}
                         {tag && !availableTag(state.tags, tag) ? (
                           <small>已停用</small>
                         ) : null}
-                        <small>{b.origin}</small>
                       </span>
                       <button
                         aria-label={`移除${scope === "page" ? `第${page}页` : "材料"}标签 ${bindingName(b, state.tags)}`}
@@ -1226,7 +1223,31 @@ function ReviewTags({
               </div>
             </section>
           ))}
-          {!bindings.length ? (
+          {tagsOnly &&
+          removedTags.filter((b) =>
+            scope === "page" ? b.page === page : !b.page,
+          ).length ? (
+            <section className="tag-family tag-removed-group">
+              <h4>本次移除</h4>
+              <div className="tag-chips">
+                {removedTags
+                  .filter((b) =>
+                    scope === "page" ? b.page === page : !b.page,
+                  )
+                  .map((b) => (
+                    <span
+                      className="tag-chip ghost removed"
+                      key={`${b.tagId}:${b.page ?? "m"}`}
+                      title="本次同步不再命中，将从该文件移除"
+                    >
+                      <s>{bindingName(b, state.tags)}</s>
+                      <small>移除</small>
+                    </span>
+                  ))}
+              </div>
+            </section>
+          ) : null}
+          {!bindings.length && !(scope === "material" && fieldGroups.length) ? (
             <div className="confirmation-no-tags">
               <Tags size={23} />
               <strong>
@@ -1394,6 +1415,36 @@ function ReviewTags({
             onChange={setQuery}
             placeholder="搜索标签名称"
           />
+          {fieldCandidates.length ? (
+            <>
+              <h4 className="picker-section">内容属性</h4>
+              <div className="confirmation-tag-picker">
+                {fieldCandidates.map(({ field, value }) => (
+                  <button
+                    key={value.id}
+                    disabled={disabled}
+                    onClick={() => {
+                      const current = item.v.fields?.[field.id] || [];
+                      setFieldValues(
+                        field.id,
+                        field.cardinality === "single"
+                          ? [value.id]
+                          : [...current, value.id],
+                      );
+                      setAdding(false);
+                    }}
+                  >
+                    <span>
+                      {value.name}
+                      <small>{field.name}</small>
+                    </span>
+                    <Plus size={16} />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+          <h4 className="picker-section">标签</h4>
           <div className="confirmation-tag-picker">
             {candidates.map((t) => (
               <button

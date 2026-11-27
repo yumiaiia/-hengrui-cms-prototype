@@ -236,17 +236,9 @@ export function reviewProblems(
       singleSeen.add(key);
     }
   }
-  if (batch?.kind === "tags") {
-    const asset = s.assets.find((a) => a.id === item.targetId);
-    if (
-      !asset ||
-      asset.lifecycle !== "正常" ||
-      asset.current !== item.baseVersion ||
-      JSON.stringify(current(asset)) !== item.baseline
-    )
-      problems.push("正式内容已变化，请重新同步本文件");
-    return problems;
-  }
+  // 标签更新批次不做"内容已变化"拦截：升版会结束上一版待归档，
+  // 批次期间内容不会被编辑或作废；标签库的编辑/停用只影响展示。
+  if (batch?.kind === "tags") return problems;
   if (v.approval.mode === "pending")
     problems.push("上传时未完成审批登记，请联系管理员核查本批次");
   if (v.approval.mode === "registered")

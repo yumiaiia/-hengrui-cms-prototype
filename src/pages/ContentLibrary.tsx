@@ -1,4 +1,4 @@
-import { bindingName } from "../tagResults";
+import { bindingName, originClass } from "../tagResults";
 import PendingUploads from "./PendingUploads";
 import { fileParsingFailed, reparseFile } from "../fileProcessing";
 import { PhaseTwoNote } from "../components/PhaseTwoNote";
@@ -623,7 +623,7 @@ export default function ContentLibrary() {
                                 .slice(0, 2)
                                 .map((b) => (
                                   <button
-                                    className="tag-chip"
+                                    className={`tag-chip ${originClass(b.origin)}`}
                                     key={b.tagId}
                                     onClick={() =>
                                       change(
@@ -642,6 +642,60 @@ export default function ContentLibrary() {
                                     }
                                   </button>
                                 ))}
+                              {(() => {
+                                const chips: {
+                                  key: string;
+                                  label: string;
+                                  manual: boolean;
+                                  title: string;
+                                }[] = [];
+                                const visibility = audiencesOf(v, state.tags);
+                                chips.push({
+                                  key: "visibility",
+                                  label: audienceShort(
+                                    visibility,
+                                    state.tags.filter(
+                                      (t) =>
+                                        t.parentId === VISIBILITY_FIELD &&
+                                        t.enabled,
+                                    ).length,
+                                  ),
+                                  manual:
+                                    !!v.fieldsManual?.includes(
+                                      VISIBILITY_FIELD,
+                                    ),
+                                  title: "用户可见范围",
+                                });
+                                for (const field of state.tags.filter(
+                                  (t) =>
+                                    !t.parentId &&
+                                    t.kind === "enum" &&
+                                    t.id !== VISIBILITY_FIELD,
+                                ))
+                                  for (const valueId of v.fields?.[field.id] ||
+                                    []) {
+                                    const name = state.tags.find(
+                                      (t) => t.id === valueId,
+                                    )?.name;
+                                    if (name)
+                                      chips.push({
+                                        key: `${field.id}:${valueId}`,
+                                        label: name,
+                                        manual:
+                                          !!v.fieldsManual?.includes(field.id),
+                                        title: field.name,
+                                      });
+                                  }
+                                return chips.slice(0, 2).map((chip) => (
+                                  <span
+                                    key={chip.key}
+                                    className={`tag-chip ${chip.manual ? "manual" : "rule"}`}
+                                    title={chip.title}
+                                  >
+                                    {chip.label}
+                                  </span>
+                                ));
+                              })()}
                               <button
                                 className="edit-tags-small"
                                 aria-label={`编辑${a.code}标签`}
@@ -650,19 +704,6 @@ export default function ContentLibrary() {
                                 <Plus size={13} />
                               </button>
                             </div>
-                            <small className="row-secondary">
-                              可见范围：
-                              {audienceShort(
-                                audiencesOf(v, state.tags),
-                                state.tags.filter(
-                                  (t) =>
-                                    t.parentId === VISIBILITY_FIELD && t.enabled,
-                                ).length,
-                              )}
-                              {v.fieldsManual?.includes(VISIBILITY_FIELD)
-                                ? "（人工）"
-                                : ""}
-                            </small>
                             {pendingRecommendationsForVersion(state, a)
                               .length ? (
                               <button

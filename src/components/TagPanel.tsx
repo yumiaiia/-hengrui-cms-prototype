@@ -1,4 +1,4 @@
-import { bindingName } from "../tagResults";
+import { bindingName, originClass } from "../tagResults";
 import { useState } from "react";
 import { Check, Plus, Sparkles, X } from "lucide-react";
 import { useCMS } from "../store";
@@ -114,7 +114,7 @@ export function TagPanel({
                       : undefined;
                   return (
                     <span
-                      className={`tag-chip ${b.origin === "人工" ? "manual" : ""}`}
+                      className={`tag-chip ${originClass(b.origin)}`}
                       key={b.tagId}
                       title={
                         b.origin === "人工"
@@ -127,7 +127,6 @@ export function TagPanel({
                       }
                     >
                       {bindingName(b, state.tags)}
-                      {b.origin === "规则" ? <small>规则</small> : null}
                       {state.tags.some(
                         (t) => t.id === b.tagId && !availableTag(state.tags, t),
                       ) ? (

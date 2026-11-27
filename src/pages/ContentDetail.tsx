@@ -1,5 +1,5 @@
 import { availableTag } from "../taxonomy";
-import { bindingName } from "../tagResults";
+import { bindingName, originClass } from "../tagResults";
 import { ContentMedia, VideoListEditor } from "../components/ContentMedia";
 import { PhaseTwoNote } from "../components/PhaseTwoNote";
 import { useEffect, useState } from "react";
@@ -117,52 +117,6 @@ export default function ContentDetail({ id }: { id: string }) {
     } catch (e) {
       toast(e instanceof Error ? e.message : "原文件暂不可用");
     }
-  }
-  // 人工调整受众集合；传 undefined 表示恢复"按规则"。
-  function setAudiences(next?: string[]) {
-    const saved = update(
-      (s) => {
-        const a = s.assets.find((a) => a.id === id)!;
-        const target = a.versions.find((x) => x.number === v!.number)!;
-        if (next) {
-          target.fields ||= {};
-          target.fields[VISIBILITY_FIELD] = next
-            .map(
-              (name) =>
-                s.tags.find(
-                  (t) => t.parentId === VISIBILITY_FIELD && t.name === name,
-                )?.id,
-            )
-            .filter((id): id is string => !!id);
-          target.fieldsManual = [
-            ...new Set([...(target.fieldsManual || []), VISIBILITY_FIELD]),
-          ];
-        } else {
-          target.fieldsManual = target.fieldsManual?.filter(
-            (dim) => dim !== VISIBILITY_FIELD,
-          );
-          applyRules(target, s.tags, s.rules);
-        }
-        a.updatedAt = now();
-      },
-      {
-        action: "修改内容标签",
-        object: asset!.code,
-        category: "标签",
-        detail: `用户可见范围 → ${
-          next
-            ? audienceLabel(
-                next,
-                state.tags.filter(
-                  (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
-                ).length,
-              )
-            : "按规则"
-        }`,
-      },
-      "tags",
-    );
-    if (saved) toast("可见范围已更新。");
   }
   function setEnumField(dimensionId: string, nextIds?: string[]) {
     const dim = state.tags.find((t) => t.id === dimensionId);
@@ -373,7 +327,17 @@ export default function ContentDetail({ id }: { id: string }) {
           {v.tags
             .filter((b) => !b.page)
             .map((b) => (
-              <span className="tag-chip" key={b.tagId}>
+              <span
+                className={`tag-chip ${originClass(b.origin)}`}
+                key={b.tagId}
+                title={
+                  b.origin === "规则"
+                    ? "规则派生"
+                    : b.origin === "人工"
+                      ? "人工校正"
+                      : "AI 识别"
+                }
+              >
                 {bindingName(b, state.tags)}
                 {state.tags.some(
                   (t) => t.id === b.tagId && !availableTag(state.tags, t),
@@ -387,36 +351,51 @@ export default function ContentDetail({ id }: { id: string }) {
           ) : null}
         </div>
         <div className="tag-chips">
-          <span className="muted">用户可见范围：</span>
-          <Badge tone="blue">
-            {audienceLabel(
-              audiencesOf(v, state.tags),
-              state.tags.filter(
-                (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
-              ).length,
-            )}
-          </Badge>
-          {v.fieldsManual?.includes(VISIBILITY_FIELD) ? (
-            <small className="muted">人工设置</small>
-          ) : (
-            <small className="muted">按派生规则</small>
-          )}
-          {state.tags
-            .filter(
+          {(() => {
+            const chips: {
+              key: string;
+              label: string;
+              manual: boolean;
+              title: string;
+            }[] = [];
+            const visibility = audiencesOf(v, state.tags);
+            chips.push({
+              key: "visibility",
+              label: visibility.length
+                ? audienceLabel(
+                    visibility,
+                    state.tags.filter(
+                      (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
+                    ).length,
+                  )
+                : "未设置",
+              manual: !!v.fieldsManual?.includes(VISIBILITY_FIELD),
+              title: "用户可见范围",
+            });
+            for (const field of state.tags.filter(
               (t) =>
-                !t.parentId &&
-                t.kind === "enum" &&
-                t.id !== VISIBILITY_FIELD &&
-                (v.fields?.[t.id]?.length || 0) > 0,
-            )
-            .map((field) => (
-              <span key={field.id} className="tag-chip">
-                {field.name}：
-                {fieldValuesOf(v, state.tags, field.id)
-                  .map((val) => val.name)
-                  .join("、")}
+                !t.parentId && t.kind === "enum" && t.id !== VISIBILITY_FIELD,
+            ))
+              for (const valueId of v.fields?.[field.id] || []) {
+                const name = state.tags.find((t) => t.id === valueId)?.name;
+                if (name)
+                  chips.push({
+                    key: `${field.id}:${valueId}`,
+                    label: name,
+                    manual: !!v.fieldsManual?.includes(field.id),
+                    title: field.name,
+                  });
+              }
+            return chips.map((chip) => (
+              <span
+                key={chip.key}
+                className={`tag-chip ${chip.manual ? "manual" : "rule"}`}
+                title={chip.title}
+              >
+                {chip.label}
               </span>
-            ))}
+            ));
+          })()}
         </div>
         <Button
           variant="ghost"
@@ -480,149 +459,66 @@ export default function ContentDetail({ id }: { id: string }) {
       </div>
       {modal === "material-tags" ? (
         <Dialog drawer title="材料标签" onClose={() => setModal("")}>
-          <p className="muted">作用于整份内容，不影响各页标签。</p>
-          <Field label="用户可见范围（字段，取值可多选，规则可推导默认值）">
-            <div className="audience-options">
-              {state.tags
-                .filter(
-                  (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
-                )
-                .sort((a, b) => (a.order || 0) - (b.order || 0))
-                .map((option) => {
-                  const current = audiencesOf(v, state.tags);
-                  const checked = current.includes(option.name);
-                  return (
-                    <label
-                      key={option.id}
-                      className={`audience-option ${checked ? "on" : ""}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={
-                          !can("tags") ||
-                          historical ||
-                          asset.lifecycle !== "正常"
-                        }
-                        onChange={(event) =>
-                          setAudiences(
-                            event.target.checked
-                              ? [...current, option.name]
-                              : current.filter((a) => a !== option.name),
-                          )
-                        }
-                      />
-                      {option.name}
-                    </label>
-                  );
-                })}
-            </div>
-            <p className="audience-hint">
-              {v.fieldsManual?.includes(VISIBILITY_FIELD) ? "人工设置" : "按规则推导"}
-              ，规则建议：
-              {audienceLabel(
-                (() => {
-                  const probe = structuredClone(v);
-                  probe.fieldsManual = undefined;
-                  applyRules(probe, state.tags, state.rules);
-                  return audiencesOf(probe, state.tags);
-                })(),
-                state.tags.filter(
-                  (t) => t.parentId === VISIBILITY_FIELD && t.enabled,
-                ).length,
-              )}
-              {v.fieldsManual?.includes(VISIBILITY_FIELD) ? (
-                <Button variant="ghost" onClick={() => setAudiences(undefined)}>
-                  恢复按规则
-                </Button>
-              ) : null}
-            </p>
-          </Field>
           {state.tags
-            .filter(
-              (t) =>
-                !t.parentId && t.kind === "enum" && t.id !== VISIBILITY_FIELD,
-            )
+            .filter((t) => !t.parentId && t.kind === "enum")
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
             .map((field) => {
               const selectedIds = v.fields?.[field.id] || [];
               const isManual = !!v.fieldsManual?.includes(field.id);
               const options = state.tags
                 .filter((t) => t.parentId === field.id && t.enabled)
                 .sort((a, b) => (a.order || 0) - (b.order || 0));
-              const suggestedIds = (() => {
-                const probe = structuredClone(v);
-                probe.fieldsManual = (probe.fieldsManual || []).filter(
-                  (d) => d !== field.id,
-                );
-                applyRules(probe, state.tags, state.rules);
-                return probe.fields?.[field.id] || [];
-              })();
-              const sameAsRule =
-                JSON.stringify([...selectedIds].sort()) ===
-                JSON.stringify([...suggestedIds].sort());
-              const suggestedText =
-                suggestedIds
-                  .map((vid) => state.tags.find((t) => t.id === vid)?.name)
-                  .filter(Boolean)
-                  .join("、") || "未设置";
-              const fieldDisabled =
+              const disabled =
                 !can("tags") ||
                 historical ||
                 asset.lifecycle !== "正常" ||
                 field.humanEditable === false;
               return (
-                <Field
-                  key={field.id}
-                  label={`${field.name}（${field.cardinality === "single" ? "单值" : "多值"}字段）`}
-                >
-                  <div className="audience-options">
+                <section className="tag-family" key={field.id}>
+                  <h4>
+                    {field.name}
+                    {isManual ? <small>人工</small> : null}
+                    {isManual && field.humanEditable !== false ? (
+                      <button
+                        type="button"
+                        className="text-link"
+                        onClick={() => setEnumField(field.id, undefined)}
+                      >
+                        恢复
+                      </button>
+                    ) : null}
+                  </h4>
+                  <div className="tag-chips">
                     {options.map((opt) => {
                       const checked = selectedIds.includes(opt.id);
                       return (
-                        <label
+                        <button
+                          type="button"
                           key={opt.id}
-                          className={`audience-option ${checked ? "on" : ""}`}
+                          className={`tag-chip ${checked ? (isManual ? "manual" : "rule") : "ghost"}`}
+                          aria-pressed={checked}
+                          disabled={disabled}
+                          onClick={() => {
+                            if (field.cardinality === "single")
+                              setEnumField(field.id, checked ? [] : [opt.id]);
+                            else
+                              setEnumField(
+                                field.id,
+                                checked
+                                  ? selectedIds.filter((x) => x !== opt.id)
+                                  : [...selectedIds, opt.id],
+                              );
+                          }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={fieldDisabled}
-                            onChange={(e) => {
-                              if (field.cardinality === "single") {
-                                setEnumField(
-                                  field.id,
-                                  e.target.checked ? [opt.id] : [],
-                                );
-                              } else {
-                                setEnumField(
-                                  field.id,
-                                  e.target.checked
-                                    ? [...selectedIds, opt.id]
-                                    : selectedIds.filter((x) => x !== opt.id),
-                                );
-                              }
-                            }}
-                          />
                           {opt.name}
-                        </label>
+                        </button>
                       );
                     })}
-                  </div>
-                  <p className="audience-hint">
-                    {isManual ? "人工设置" : "按规则推导"}
-                    {isManual && !sameAsRule
-                      ? `，规则建议：${suggestedText}`
-                      : ""}
-                    {isManual && field.humanEditable !== false ? (
-                      <Button
-                        variant="ghost"
-                        onClick={() => setEnumField(field.id, undefined)}
-                      >
-                        恢复按规则
-                      </Button>
+                    {!options.length ? (
+                      <span className="muted">无可选值</span>
                     ) : null}
-                  </p>
-                </Field>
+                  </div>
+                </section>
               );
             })}
           <TagPanel assetId={id} versionNumber={v.number} />

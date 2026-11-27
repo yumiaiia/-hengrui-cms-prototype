@@ -2788,18 +2788,8 @@
   border: 1px dashed var(--line);
   border-radius: 10px;
 }
-.audience-options {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 4px 0;
-}
-.audience-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
+
+
 @media (max-width: 760px) {
   .rule-columns {
     grid-template-columns: 1fr;
@@ -3366,4 +3356,62 @@
 }
 .form-grid label.actions {
   align-items: center;
+}
+
+/* 标签来源统一用颜色区分：AI 蓝 / 人工 琥珀 / 规则 紫 */
+.tag-chip.ai {
+  background: #eef4ff;
+  border: 1px solid #cfe0ff;
+  color: #2f5fb3;
+}
+.tag-chip.manual {
+  background: #fff6e8;
+  border: 1px solid #f0dcb4;
+  color: #8a5a00;
+}
+.tag-chip.rule {
+  background: #f3f0ff;
+  border: 1px solid #ddd4f7;
+  color: #5b45a8;
+}
+
+/* 字段与标签统一为芯片：未选中用虚线圈，选中按来源着色 */
+.tag-chip.ghost {
+  background: #fff;
+  border: 1px dashed #d7dfec;
+  color: #7b8aa0;
+  font-weight: 400;
+}
+.tag-chip.ghost:hover {
+  border-color: #9fb8da;
+  color: #2f5fb3;
+}
+.tag-family h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tag-family h4 small {
+  font-size: 10px;
+  font-weight: 400;
+  color: #8a5a00;
+  background: #fff6e8;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.tag-family h4 .text-link {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+/* 列表里的标签更紧凑，尽量一行放下 */
+.table-tags .tag-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  gap: 3px;
+}
+.table-tags .tag-chip button svg {
+  width: 10px;
+  height: 10px;
 }

@@ -645,6 +645,11 @@ export default function Tags() {
     if (!tag.name) return setError("请输入名称");
     if (editor.kind === "value" && !tag.parentId)
       return setError("请选择所属维度。");
+    if (editor.kind === "dimension" && editor.draft.kind === "enum")
+      editor = {
+        ...editor,
+        draft: { ...editor.draft, ai: "none", scope: "material" },
+      };
     if (editor.kind === "value") {
       const message = validateTag(state.tags, tag);
       if (message) return setError(message);
@@ -694,27 +699,35 @@ export default function Tags() {
   }
   function saveTag() {
     if (!editor || !can("taxonomy")) return;
-    if (editor.kind === "value") {
-      const draft = editor.draft;
+    // 字段固定不参与 AI、只作用于材料级，界面上不暴露这两个开关。
+    const current: Editor =
+      editor.kind === "dimension" && editor.draft.kind === "enum"
+        ? {
+            ...editor,
+            draft: { ...editor.draft, ai: "none", scope: "material" },
+          }
+        : editor;
+    if (current.kind === "value") {
+      const draft = current.draft;
       if (
         previous &&
         previous.name === draft.name.trim() &&
         previous.parentId === draft.parentId
       ) {
-        persist(editor);
+        persist(current);
         return;
       }
       try {
         checkTag(
           { ...draft, name: draft.name.trim() },
-          (choice) => persist(editor, choice.receipt),
+          (choice) => persist(current, choice.receipt),
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : "检查失败");
       }
       return;
     }
-    persist(editor);
+    persist(current);
   }
 
   function saveRule(rule: Rule) {
@@ -1492,41 +1505,39 @@ export default function Tags() {
                     </small>
                   ) : null}
                 </Field>
-                <Field label="AI 匹配">
-                  <Segmented
-                    disabled={editor.draft.kind === "enum"}
-                    value={editor.draft.kind === "enum" ? "none" : editor.draft.ai || "closed"}
-                    options={[
-                      { value: "closed", label: "闭集" },
-                      { value: "open", label: "开放" },
-                      { value: "none", label: "不参与" },
-                    ]}
-                    onChange={(ai) =>
-                      setEditor({ ...editor, draft: { ...editor.draft, ai } })
-                    }
-                  />
-                </Field>
-                <Field label="作用域">
-                  <Segmented
-                    disabled={editor.draft.kind === "enum"}
-                    value={
-                      editor.draft.kind === "enum"
-                        ? "material"
-                        : editor.draft.scope || "material"
-                    }
-                    options={[
-                      { value: "material", label: "材料级" },
-                      { value: "page", label: "页级" },
-                      { value: "both", label: "两者" },
-                    ]}
-                    onChange={(scope) =>
-                      setEditor({
-                        ...editor,
-                        draft: { ...editor.draft, scope },
-                      })
-                    }
-                  />
-                </Field>
+                {editor.draft.kind === "enum" ? null : (
+                  <Field label="AI 匹配">
+                    <Segmented
+                      value={editor.draft.ai || "closed"}
+                      options={[
+                        { value: "closed", label: "闭集" },
+                        { value: "open", label: "开放" },
+                        { value: "none", label: "不参与" },
+                      ]}
+                      onChange={(ai) =>
+                        setEditor({ ...editor, draft: { ...editor.draft, ai } })
+                      }
+                    />
+                  </Field>
+                )}
+                {editor.draft.kind === "enum" ? null : (
+                  <Field label="作用域">
+                    <Segmented
+                      value={editor.draft.scope || "material"}
+                      options={[
+                        { value: "material", label: "材料级" },
+                        { value: "page", label: "页级" },
+                        { value: "both", label: "两者" },
+                      ]}
+                      onChange={(scope) =>
+                        setEditor({
+                          ...editor,
+                          draft: { ...editor.draft, scope },
+                        })
+                      }
+                    />
+                  </Field>
+                )}
                 {editor.draft.kind === "enum" ? (
                   <>
                     <Field label="合并策略">

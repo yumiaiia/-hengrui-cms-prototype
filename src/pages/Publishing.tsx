@@ -2,6 +2,7 @@ import {
   normalizePublicationStatus,
   publicationStatuses,
 } from "../simplification";
+import { originClass } from "../tagResults";
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -769,7 +770,10 @@ export default function Publishing({
                                     .filter((b) => !b.page)
                                     .slice(0, 3)
                                     .map((b) => (
-                                      <span className="tag-chip" key={b.tagId}>
+                                      <span
+                                        className={`tag-chip ${originClass(b.origin)}`}
+                                        key={b.tagId}
+                                      >
                                         {
                                           state.tags.find(
                                             (t) => t.id === b.tagId,

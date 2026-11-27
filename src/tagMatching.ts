@@ -26,7 +26,6 @@ import {
   enforceSingleValue,
   exclusionMatches,
   stampBinding,
-  tagDefinitions,
   tagHitsText,
 } from "./tagResults";
 
@@ -268,17 +267,10 @@ export function advanceTagMatching(s: State, task: Task) {
     if (!item || item.cancelled || item.archived) entry.status = "完成";
     else
       try {
-        const a = s.assets.find((a) => a.id === item.targetId);
-        if (
-          !a ||
-          a.lifecycle !== "正常" ||
-          a.current !== item.baseVersion ||
-          JSON.stringify(current(a)) !== item.baseline
-        )
-          throw new Error("正式内容已变化，请重新同步本文件。");
-        const tags = item.tagSnapshot || batch.tagSnapshot || [];
-        if (tagDefinitions(tags) !== tagDefinitions(s.tags))
-          throw new Error("标签库已更新，请重新同步本文件。");
+        const a = s.assets.find((x) => x.id === item.targetId);
+        if (!a) throw new Error("目标内容不存在，无法同步。");
+        // 用当前标签库：期间的改名/停用直接体现在结果与展示上，不打断批次。
+        const tags = s.tags;
         const source = structuredClone(current(a));
         source.tagExclusions = structuredClone(item.v.tagExclusions);
         const rules = batch.ruleSnapshot || s.rules;

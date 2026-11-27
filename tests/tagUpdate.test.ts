@@ -265,21 +265,15 @@ describe("标签更新结果与确认", () => {
       matchingResult(next, s.tags).tags.some((x) => x.tagId === "t1" && x.page === 2),
     ).toBe(true);
   });
-  it("正式标签在确认后被编辑时拒绝旧结果，重新匹配后可继续", () => {
+  it("确认后内容被改动不打断批次，归档仍生成新版本", () => {
     const { s, a, v } = setup();
     const b = match(s, a.id),
       i = b.items[0];
     confirmStaged(s, b.id, i.id);
+    // 业务上待归档内容不会被编辑；即便发生，也只以批次基准版本生成新版本。
     v.summary = "他人更新摘要";
-    const newest = structuredClone(v);
-    expect(archiveStaged(s, b.id, [i.id])).toEqual({ success: 0, failed: 1 });
-    expect(v).toEqual(newest);
-    retryStaged(s, b.id, i.id);
-    const task = s.tasks[0];
-    advanceTagMatching(s, task);
-    expect(i.confirmedRevision).toBeUndefined();
-    confirmStaged(s, b.id, i.id);
     expect(archiveStaged(s, b.id, [i.id]).success).toBe(1);
+    expect(current(a).number).toBe(v.number + 1);
   });
   it("标签改名或停用后仍可确认归档，元数据保持只读，原版本不受影响", () => {
     const { s, a, v } = setup();

@@ -230,10 +230,8 @@ describe("标签匹配暂存结果", () => {
       false,
     );
     expect(done.items.some((i) => i.assetId === a.id)).toBe(false);
-    expect(done.items.find((i) => i.assetId === other.id)?.status).toBe("失败");
-    expect(
-      s.uploadBatches![0].items.find((i) => i.targetId === other.id)?.error,
-    ).toContain("变化");
+    // 批次期间内容状态变化不再打断单文件匹配，由归档时的并发校验兜底。
+    expect(done.items.find((i) => i.assetId === other.id)?.status).toBe("完成");
   });
   it("权限和并发受控，失败重试保留成功结果", () => {
     const s = setup(),
