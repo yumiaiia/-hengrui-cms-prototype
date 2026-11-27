@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Tags } from "lucide-react";
 import { useCMS } from "../store";
-import { availableTag, primaryTags } from "../taxonomy";
+import {
+  availableTag,
+  dimensionAllowsScope,
+  primaryTags,
+} from "../taxonomy";
 import { SearchBox } from "./ui";
 export function TagFilter({
   scope,
@@ -34,10 +38,16 @@ export function TagFilter({
   const { state } = useCMS();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
+  const pageScope = scope === "页级标签" ? 1 : undefined;
+  const roots = primaryTags(state.tags).filter(
+    (t) =>
+      t.kind !== "enum" && dimensionAllowsScope(state.tags, t.id, pageScope),
+  );
   const tags = state.tags.filter(
     (t) =>
       t.parentId &&
       availableTag(state.tags, t) &&
+      dimensionAllowsScope(state.tags, t.parentId, pageScope) &&
       (!category || t.parentId === category) &&
       t.name.toLowerCase().includes(query.toLowerCase()),
   );
@@ -61,7 +71,7 @@ export function TagFilter({
           >
             全部
           </button>
-          {primaryTags(state.tags).map((t) => (
+          {roots.map((t) => (
             <button
               key={t.id}
               className={category === t.id ? "active" : ""}

@@ -164,6 +164,43 @@ export default function ContentDetail({ id }: { id: string }) {
     );
     if (saved) toast("可见范围已更新。");
   }
+  function setEnumField(dimensionId: string, nextIds?: string[]) {
+    const dim = state.tags.find((t) => t.id === dimensionId);
+    const saved = update(
+      (s) => {
+        const a = s.assets.find((a) => a.id === id)!;
+        const target = a.versions.find((x) => x.number === v!.number)!;
+        if (nextIds !== undefined) {
+          target.fields ||= {};
+          target.fields[dimensionId] = [...nextIds];
+          target.fieldsManual = [
+            ...new Set([...(target.fieldsManual || []), dimensionId]),
+          ];
+        } else {
+          target.fieldsManual = target.fieldsManual?.filter(
+            (d) => d !== dimensionId,
+          );
+          applyRules(target, s.tags, s.rules);
+        }
+        a.updatedAt = now();
+      },
+      {
+        action: "修改内容标签",
+        object: asset!.code,
+        category: "标签",
+        detail: `${dim?.name || dimensionId} → ${
+          nextIds !== undefined
+            ? nextIds
+                .map((vid) => state.tags.find((t) => t.id === vid)?.name)
+                .filter(Boolean)
+                .join("、") || "未设置"
+            : "按规则"
+        }`,
+      },
+      "tags",
+    );
+    if (saved) toast(`${dim?.name || "字段"}已更新。`);
+  }
   function openEdit() {
     setTitle(v!.title);
     setSummary(v!.summary);
@@ -364,6 +401,22 @@ export default function ContentDetail({ id }: { id: string }) {
           ) : (
             <small className="muted">按派生规则</small>
           )}
+          {state.tags
+            .filter(
+              (t) =>
+                !t.parentId &&
+                t.kind === "enum" &&
+                t.id !== VISIBILITY_FIELD &&
+                (v.fields?.[t.id]?.length || 0) > 0,
+            )
+            .map((field) => (
+              <span key={field.id} className="tag-chip">
+                {field.name}：
+                {fieldValuesOf(v, state.tags, field.id)
+                  .map((val) => val.name)
+                  .join("、")}
+              </span>
+            ))}
         </div>
         <Button
           variant="ghost"
@@ -485,6 +538,93 @@ export default function ContentDetail({ id }: { id: string }) {
               ) : null}
             </p>
           </Field>
+          {state.tags
+            .filter(
+              (t) =>
+                !t.parentId && t.kind === "enum" && t.id !== VISIBILITY_FIELD,
+            )
+            .map((field) => {
+              const selectedIds = v.fields?.[field.id] || [];
+              const isManual = !!v.fieldsManual?.includes(field.id);
+              const options = state.tags
+                .filter((t) => t.parentId === field.id && t.enabled)
+                .sort((a, b) => (a.order || 0) - (b.order || 0));
+              const suggestedIds = (() => {
+                const probe = structuredClone(v);
+                probe.fieldsManual = (probe.fieldsManual || []).filter(
+                  (d) => d !== field.id,
+                );
+                applyRules(probe, state.tags, state.rules);
+                return probe.fields?.[field.id] || [];
+              })();
+              const sameAsRule =
+                JSON.stringify([...selectedIds].sort()) ===
+                JSON.stringify([...suggestedIds].sort());
+              const suggestedText =
+                suggestedIds
+                  .map((vid) => state.tags.find((t) => t.id === vid)?.name)
+                  .filter(Boolean)
+                  .join("、") || "未设置";
+              const fieldDisabled =
+                !can("tags") ||
+                historical ||
+                asset.lifecycle !== "正常" ||
+                field.humanEditable === false;
+              return (
+                <Field
+                  key={field.id}
+                  label={`${field.name}（${field.cardinality === "single" ? "单值" : "多值"}字段）`}
+                >
+                  <div className="audience-options">
+                    {options.map((opt) => {
+                      const checked = selectedIds.includes(opt.id);
+                      return (
+                        <label
+                          key={opt.id}
+                          className={`audience-option ${checked ? "on" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={fieldDisabled}
+                            onChange={(e) => {
+                              if (field.cardinality === "single") {
+                                setEnumField(
+                                  field.id,
+                                  e.target.checked ? [opt.id] : [],
+                                );
+                              } else {
+                                setEnumField(
+                                  field.id,
+                                  e.target.checked
+                                    ? [...selectedIds, opt.id]
+                                    : selectedIds.filter((x) => x !== opt.id),
+                                );
+                              }
+                            }}
+                          />
+                          {opt.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="audience-hint">
+                    {isManual ? "人工设置" : "按规则推导"}
+                    {isManual && !sameAsRule
+                      ? `，规则建议：${suggestedText}`
+                      : ""}
+                    {isManual && field.humanEditable !== false ? (
+                      <Button
+                        variant="ghost"
+                        onClick={() => setEnumField(field.id, undefined)}
+                      >
+                        恢复按规则
+                      </Button>
+                    ) : null}
+                  </p>
+                </Field>
+              );
+            })}
           <TagPanel assetId={id} versionNumber={v.number} />
         </Dialog>
       ) : null}

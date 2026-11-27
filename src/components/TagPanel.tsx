@@ -6,9 +6,11 @@ import { current, now, type Version } from "../model";
 import {
   availableTag,
   bindTag,
+  dimensionAllowsScope,
   removeTag,
   pendingSuggestions,
   primaryTags,
+  selectableTag,
   suggestionContexts,
 } from "../taxonomy";
 import { Badge, Button, Dialog, SearchBox } from "./ui";
@@ -42,7 +44,10 @@ export function TagPanel({
     asset.current === number &&
     asset.lifecycle === "正常" &&
     can("tags");
-  const roots = primaryTags(state.tags);
+  const roots = primaryTags(state.tags).filter((t) => t.kind !== "enum");
+  const scopedRoots = roots.filter((t) =>
+    dimensionAllowsScope(state.tags, t.id, page),
+  );
   const bindings = version.tags.filter((b) => b.page === page);
   const suggestions = allSuggestions
     ? state.suggestions.filter((s) =>
@@ -85,7 +90,7 @@ export function TagPanel({
   const options = state.tags.filter(
     (t) =>
       t.parentId &&
-      availableTag(state.tags, t) &&
+      selectableTag(state.tags, t, page) &&
       (!category || t.parentId === category) &&
       t.name.toLowerCase().includes(query.toLowerCase()),
   );
@@ -102,28 +107,43 @@ export function TagPanel({
             <section className="tag-family" key={root.id}>
               <h4>{root.name}</h4>
               <div className="tag-chips">
-                {list.map((b) => (
-                  <span
-                    className={`tag-chip ${b.origin === "人工" ? "manual" : ""}`}
-                    key={b.tagId}
-                    title={b.origin === "人工" ? "人工校正" : "AI 识别"}
-                  >
-                    {bindingName(b, state.tags)}
-                    {state.tags.some(
-                      (t) => t.id === b.tagId && !availableTag(state.tags, t),
-                    ) ? (
-                      <small>（已停用）</small>
-                    ) : null}
-                    {editable ? (
-                      <button
-                        aria-label={`移除标签${bindingName(b, state.tags)}`}
-                        onClick={() => toggle(b.tagId)}
-                      >
-                        <X size={12} />
-                      </button>
-                    ) : null}
-                  </span>
-                ))}
+                {list.map((b) => {
+                  const ruleName =
+                    b.origin === "规则" && b.ruleId
+                      ? state.rules.find((r) => r.id === b.ruleId)?.name
+                      : undefined;
+                  return (
+                    <span
+                      className={`tag-chip ${b.origin === "人工" ? "manual" : ""}`}
+                      key={b.tagId}
+                      title={
+                        b.origin === "人工"
+                          ? "人工校正"
+                          : b.origin === "规则"
+                            ? ruleName
+                              ? `规则派生：${ruleName}`
+                              : "规则派生"
+                            : "AI 识别"
+                      }
+                    >
+                      {bindingName(b, state.tags)}
+                      {b.origin === "规则" ? <small>规则</small> : null}
+                      {state.tags.some(
+                        (t) => t.id === b.tagId && !availableTag(state.tags, t),
+                      ) ? (
+                        <small>（已停用）</small>
+                      ) : null}
+                      {editable ? (
+                        <button
+                          aria-label={`移除标签${bindingName(b, state.tags)}`}
+                          onClick={() => toggle(b.tagId)}
+                        >
+                          <X size={12} />
+                        </button>
+                      ) : null}
+                    </span>
+                  );
+                })}
               </div>
             </section>
           ) : null;
@@ -200,7 +220,7 @@ export function TagPanel({
             >
               全部
             </button>
-            {roots
+            {scopedRoots
               .filter((t) => t.enabled)
               .map((t) => (
                 <button
@@ -212,7 +232,7 @@ export function TagPanel({
                 </button>
               ))}
           </div>
-          {roots.map((root) => {
+          {scopedRoots.map((root) => {
             const list = options.filter((t) => t.parentId === root.id);
             return list.length ? (
               <section className="tag-picker-group" key={root.id}>

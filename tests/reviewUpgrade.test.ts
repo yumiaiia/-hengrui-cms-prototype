@@ -283,7 +283,16 @@ describe("待确认归档流程", () => {
     item.v.pageStates = { 1: { status: "失败" } };
     expect(() => confirmStaged(s, id, item.id)).toThrow("页面解析失败");
     item.v.pageStates = { 1: { status: "完成" } };
-    const tag = s.tags.find((t) => t.parentId)!;
+    const tag = s.tags.find(
+      (t) =>
+        t.parentId &&
+        s.tags.some(
+          (d) =>
+            d.id === t.parentId &&
+            d.kind !== "enum" &&
+            (d.scope === "page" || d.scope === "both" || !d.scope),
+        ),
+    )!;
     item.recommendations = [
       { id: "rec", name: "测试推荐", parentId: tag.parentId!, page: 2 },
     ];

@@ -14,6 +14,7 @@ import {
 } from "./model";
 import {
   aiEligibleTag,
+  aiEligibleTagForScope,
   availableTag,
   pendingRecommendationsForVersion,
   pendingSuggestions,
@@ -127,13 +128,18 @@ export function matchingResult(
     value.normalize("NFKC").trim().toLocaleLowerCase();
   for (const tag of eligible) {
     if (
+      aiEligibleTagForScope(tags, tag, undefined) &&
       !hasBinding(tag) &&
       tagHitsText(tag, text([version.title, version.summary, ...version.content].join(" ")))
     )
       add(tag);
     if (paginated(version))
       version.content.slice(0, version.pages).forEach((body, i) => {
-        if (!hasBinding(tag, i + 1) && tagHitsText(tag, text(body)))
+        if (
+          aiEligibleTagForScope(tags, tag, i + 1) &&
+          !hasBinding(tag, i + 1) &&
+          tagHitsText(tag, text(body))
+        )
           add(tag, i + 1);
       });
   }

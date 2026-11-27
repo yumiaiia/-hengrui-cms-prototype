@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { CancelBatch } from "../components/CancelBatch";
-import { bindingName, boundDefinitions } from "../tagResults";
+import { applyRules, bindingName, boundDefinitions } from "../tagResults";
 import { useCMS } from "../store";
 import {
   archiveStaged,
@@ -32,13 +32,21 @@ import {
   resolveStagedRecommendation,
   restoreStagedRecommendation,
 } from "../uploadReview";
-import { availableTag, tagLabel, validateTag } from "../taxonomy";
+import {
+  availableTag,
+  dimensionAllowsScope,
+  selectableTag,
+  tagLabel,
+  validateTag,
+} from "../taxonomy";
 import { requireTagCheck } from "../tagSimilarity";
 import {
+  audienceLabel,
   dateLabel,
   go,
   uid,
   canRole,
+  VISIBILITY_FIELD,
   type State,
   type StagedUploadItem,
 } from "../model";
@@ -884,13 +892,19 @@ function ReviewTags({
   const { checkTag, similarityDialog } = useTagCheck();
   const currentPage = scope === "page" ? page : undefined;
   const bindings = item.v.tags.filter((b) => b.page === currentPage);
+  const batch = state.uploadBatches?.find((b) => b.id === batchId);
+  const activeRules =
+    batch?.kind === "tags" && batch.ruleSnapshot
+      ? batch.ruleSnapshot
+      : state.rules;
+  const enumFields = state.tags.filter((t) => !t.parentId && t.kind === "enum");
   const activeRecommendation = item.recommendations?.find(
     (r) => r.id === recommendation,
   );
   const candidates = state.tags.filter(
     (t) =>
       t.parentId &&
-      availableTag(state.tags, t) &&
+      selectableTag(state.tags, t, currentPage) &&
       (!activeRecommendation || t.parentId === activeRecommendation.parentId) &&
       t.name.toLowerCase().includes(query.toLowerCase()),
   );
@@ -1019,6 +1033,104 @@ function ReviewTags({
         <span>{item.v.tags.length} 个</span>
       </div>
       <fieldset disabled={disabled}>
+        {enumFields.length ? (
+          <div className="confirmation-fields">
+            {enumFields.map((field) => {
+              const selectedIds = item.v.fields?.[field.id] || [];
+              const isManual = !!item.v.fieldsManual?.includes(field.id);
+              const fieldValues = state.tags
+                .filter((t) => t.parentId === field.id && t.enabled)
+                .sort((a, b) => (a.order || 0) - (b.order || 0));
+              const suggestedIds = (() => {
+                const probe = structuredClone(item.v);
+                probe.fieldsManual = (probe.fieldsManual || []).filter(
+                  (d) => d !== field.id,
+                );
+                applyRules(probe, state.tags, activeRules);
+                return probe.fields?.[field.id] || [];
+              })();
+              const sameAsRule =
+                JSON.stringify([...selectedIds].sort()) ===
+                JSON.stringify([...suggestedIds].sort());
+              const labelOf = (ids: string[]) =>
+                field.id === VISIBILITY_FIELD
+                  ? audienceLabel(
+                      ids
+                        .map(
+                          (vid) => state.tags.find((t) => t.id === vid)?.name,
+                        )
+                        .filter(Boolean) as string[],
+                      fieldValues.length,
+                    )
+                  : ids
+                      .map((vid) => state.tags.find((t) => t.id === vid)?.name)
+                      .filter(Boolean)
+                      .join("、") || "未设置";
+              const updateField = (nextIds?: string[]) => {
+                const nextFields = { ...(item.v.fields || {}) };
+                let nextManual = [...(item.v.fieldsManual || [])];
+                if (nextIds === undefined) {
+                  nextManual = nextManual.filter((d) => d !== field.id);
+                  delete nextFields[field.id];
+                } else {
+                  nextFields[field.id] = nextIds;
+                  if (!nextManual.includes(field.id)) nextManual.push(field.id);
+                }
+                patch({ fields: nextFields, fieldsManual: nextManual });
+              };
+              return (
+                <div className="confirmation-field-row" key={field.id}>
+                  <div className="confirmation-field-head">
+                    <strong>{field.name}</strong>
+                    <small className="muted">
+                      {isManual ? "人工设置" : "按规则推导"}
+                    </small>
+                    {isManual && !sameAsRule ? (
+                      <small className="muted">
+                        规则建议：{labelOf(suggestedIds)}
+                      </small>
+                    ) : null}
+                    {isManual && field.humanEditable !== false ? (
+                      <button
+                        type="button"
+                        className="text-link"
+                        onClick={() => updateField(undefined)}
+                      >
+                        恢复按规则
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="confirmation-field-options">
+                    {fieldValues.map((opt) => {
+                      const checked = selectedIds.includes(opt.id);
+                      return (
+                        <label key={opt.id} className="actions">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={disabled || field.humanEditable === false}
+                            onChange={(e) => {
+                              if (field.cardinality === "single") {
+                                updateField(e.target.checked ? [opt.id] : []);
+                              } else {
+                                updateField(
+                                  e.target.checked
+                                    ? [...selectedIds, opt.id]
+                                    : selectedIds.filter((x) => x !== opt.id),
+                                );
+                              }
+                            }}
+                          />
+                          {opt.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <div
           className="confirmation-scope"
           role="tablist"
@@ -1074,9 +1186,16 @@ function ReviewTags({
               <div>
                 {tags.map((b) => {
                   const tag = state.tags.find((t) => t.id === b.tagId);
+                  const ruleName =
+                    b.origin === "规则" && b.ruleId
+                      ? activeRules.find((r) => r.id === b.ruleId)?.name
+                      : undefined;
                   return (
                     <span
                       key={b.tagId}
+                      title={
+                        ruleName ? `规则派生：${ruleName}` : undefined
+                      }
                       className={`confirmation-tag ${tag && availableTag(state.tags, tag) ? "" : "is-invalid"}`}
                     >
                       <span>
@@ -1084,7 +1203,7 @@ function ReviewTags({
                         {tag && !availableTag(state.tags, tag) ? (
                           <small>已停用</small>
                         ) : null}
-                        <small>{b.origin === "AI" ? "AI" : "人工"}</small>
+                        <small>{b.origin}</small>
                       </span>
                       <button
                         aria-label={`移除${scope === "page" ? `第${page}页` : "材料"}标签 ${bindingName(b, state.tags)}`}
@@ -1340,7 +1459,19 @@ function ReviewTags({
             >
               <option value="">请选择分类</option>
               {state.tags
-                .filter((t) => !t.parentId && t.enabled)
+                .filter(
+                  (t) =>
+                    !t.parentId &&
+                    t.enabled &&
+                    t.kind !== "enum" &&
+                    dimensionAllowsScope(
+                      state.tags,
+                      t.id,
+                      creation.recommendationId
+                        ? activeRecommendation?.page
+                        : creation.page,
+                    ),
+                )
                 .map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}

@@ -353,7 +353,7 @@ export const referenceTags: Tag[] = referenceDimensions.flatMap((dim) => {
     cardinality: dim.cardinality,
     scope: dim.scope || "material",
     ai: dim.ai || "closed",
-    merge: dim.merge || "union",
+    merge: dim.merge || (dim.cardinality === "single" ? "priority" : "union"),
     fallbackId: dim.fallback ? refValueId(dim.name, dim.fallback) : undefined,
     humanEditable: dim.humanEditable,
   };

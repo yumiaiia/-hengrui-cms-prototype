@@ -132,6 +132,7 @@ export function ExportDialog({
             values: ids.map(
               (id) => state.tags.find((t) => t.id === id)?.name || id,
             ),
+            source: v.fieldsManual?.includes(dim) ? "人工" : "规则",
           })),
         };
         files[folder + "metadata.json"] = strToU8(

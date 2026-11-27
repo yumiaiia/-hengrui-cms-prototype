@@ -152,7 +152,13 @@ describe("标签匹配暂存结果", () => {
     const s = setup(),
       a = matchableAssets(s)[0],
       v = current(a);
-    const root = s.tags.find((t) => t.parentId === null && t.enabled)!;
+    const root = s.tags.find(
+      (t) =>
+        t.parentId === null &&
+        t.enabled &&
+        t.kind !== "enum" &&
+        t.scope === "both",
+    )!;
     s.tags.push({
       id: "match-test",
       parentId: root.id,

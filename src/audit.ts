@@ -32,7 +32,7 @@ export function auditModule(
     return "系统管理";
   if (/采集/.test(audit.action)) return "公众号采集";
   if (
-    /标签/.test(audit.action) &&
+    /标签|维度|取值|派生规则|规则/.test(audit.action) &&
     !/内容|暂存|归档|材料|页级/.test(audit.action)
   )
     return "标签管理";

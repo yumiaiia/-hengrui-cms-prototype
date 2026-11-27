@@ -11,7 +11,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { priorityConflict, recalcRules } from "../ruleImpact";
+import {
+  priorityConflict,
+  recalcRules,
+  validateRuleDraft,
+} from "../ruleImpact";
 import { SyncTagsDialog } from "../components/SyncTagsDialog";
 import {
   applyTagImport,
@@ -68,10 +72,12 @@ function Segmented<T extends string>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="segmented" role="group">
@@ -79,9 +85,10 @@ function Segmented<T extends string>({
         <button
           type="button"
           key={option.value}
+          disabled={disabled}
           className={option.value === value ? "on" : ""}
           aria-pressed={option.value === value}
-          onClick={() => onChange(option.value)}
+          onClick={() => !disabled && onChange(option.value)}
         >
           {option.label}
         </button>
@@ -121,10 +128,12 @@ function ValuePicker({
   values,
   selected,
   onChange,
+  single = false,
 }: {
   values: Tag[];
   selected: string[];
   onChange: (ids: string[]) => void;
+  single?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const enabled = values.filter((value) => value.enabled);
@@ -139,9 +148,13 @@ function ValuePicker({
   );
   const toggle = (id: string) =>
     onChange(
-      selected.includes(id)
-        ? selected.filter((x) => x !== id)
-        : [...selected, id],
+      single
+        ? selected.includes(id)
+          ? []
+          : [id]
+        : selected.includes(id)
+          ? selected.filter((x) => x !== id)
+          : [...selected, id],
     );
   return (
     <div className="picker">
@@ -325,17 +338,16 @@ function RuleEditor({
   const [draft, setDraft] = useState<Rule>(rule);
   const dimensions = state.tags.filter((tag) => !tag.parentId && tag.enabled);
   const valuesOf = (id: string) => state.tags.filter((tag) => tag.parentId === id);
-  const triggerValues = valuesOf(draft.trigger.dimensionId);
+  const triggerValues = valuesOf(draft.trigger.dimensionId).filter(
+    (t) => !t.derivedOnly,
+  );
+  const actionDim = dimensions.find((t) => t.id === draft.action.dimensionId);
   const actionValues = valuesOf(draft.action.dimensionId);
   const sameDimension =
     draft.trigger.dimensionId === draft.action.dimensionId;
   const priorityClash = priorityConflict(state.rules, draft);
-  const invalid =
-    !draft.name.trim() ||
-    !draft.trigger.valueIds.length ||
-    !draft.action.valueIds.length ||
-    sameDimension ||
-    !!priorityClash;
+  const ruleError = validateRuleDraft(state.tags, state.rules, draft);
+  const invalid = !!ruleError;
   const submit = () => {
     if (!invalid) onSave({ ...draft, name: draft.name.trim() });
   };
@@ -387,11 +399,17 @@ function RuleEditor({
         </div>
         {sameDimension ? (
           <p className="error-text">触发维度和结果维度不能相同。</p>
-        ) : null}
-        {priorityClash ? (
+        ) : priorityClash ? (
           <p className="error-text">
             该维度已有优先级 {draft.priority}（{priorityClash.name}），请换一个。
           </p>
+        ) : ruleError &&
+          (draft.action.valueIds.length > 1 ||
+            draft.trigger.valueIds.some(
+              (id) => state.tags.find((t) => t.id === id)?.derivedOnly,
+            ) ||
+            !Number.isInteger(draft.priority)) ? (
+          <p className="error-text">{ruleError}</p>
         ) : null}
         <div className="rule-builder">
           <section className="rule-panel">
@@ -438,7 +456,11 @@ function RuleEditor({
           <section className="rule-panel">
             <header>
               <strong>结果</strong>
-              <span className="muted">命中后写入</span>
+              <span className="muted">
+                {actionDim?.cardinality === "single"
+                  ? "单值维度（仅选 1 项）"
+                  : "命中后写入"}
+              </span>
             </header>
             <DimensionChips
               dimensions={dimensions}
@@ -453,6 +475,7 @@ function RuleEditor({
             <ValuePicker
               values={actionValues}
               selected={draft.action.valueIds}
+              single={actionDim?.cardinality === "single"}
               onChange={(ids) =>
                 setDraft({
                   ...draft,
@@ -656,6 +679,7 @@ export default function Tags() {
               ? tag.name
               : `${dimensionName(state.tags, tag.parentId || "")} / ${tag.name}`,
           category: "标签",
+          module: "标签管理",
         },
         "taxonomy",
       );
@@ -695,14 +719,10 @@ export default function Tags() {
 
   function saveRule(rule: Rule) {
     if (!can("taxonomy")) return;
-    if (rule.trigger.dimensionId === rule.action.dimensionId) {
-      toast("触发维度与目标维度不能相同");
-      return;
-    }
     const next = { ...rule, id: rule.id || uid("rule") };
-    const clash = priorityConflict(state.rules, next);
-    if (clash) {
-      toast(`同一目标维度的优先级不能重复：${next.priority}（${clash.name}）`);
+    const message = validateRuleDraft(state.tags, state.rules, next);
+    if (message) {
+      toast(message);
       return;
     }
     let changed = 0;
@@ -714,9 +734,12 @@ export default function Tags() {
         changed = recalcRules(s);
       },
       {
-        action: "保存派生规则",
+        action: state.rules.some((r) => r.id === next.id)
+          ? "编辑规则"
+          : "新增规则",
         object: next.name,
         category: "标签",
+        module: "标签管理",
         detail: `${dimensionName(state.tags, next.trigger.dimensionId)} → ${dimensionName(state.tags, next.action.dimensionId)}`,
       },
       "taxonomy",
@@ -735,9 +758,10 @@ export default function Tags() {
         changed = recalcRules(s);
       },
       {
-        action: rule.enabled ? "停用派生规则" : "启用派生规则",
+        action: rule.enabled ? "停用规则" : "启用规则",
         object: rule.name,
         category: "标签",
+        module: "标签管理",
       },
       "taxonomy",
     );
@@ -745,7 +769,9 @@ export default function Tags() {
   }
   function removeRule(rule: Rule) {
     if (
-      !window.confirm(`删除规则「${rule.name}」？已派生的取值不会自动撤销。`)
+      !window.confirm(
+        `删除规则「${rule.name}」？将立即重算正式内容当前版本，自动撤销该规则产物（人工值保留）。`,
+      )
     )
       return;
     let changed = 0;
@@ -754,10 +780,57 @@ export default function Tags() {
         s.rules = s.rules.filter((r) => r.id !== rule.id);
         changed = recalcRules(s);
       },
-      { action: "删除派生规则", object: rule.name, category: "标签" },
+      {
+        action: "删除规则",
+        object: rule.name,
+        category: "标签",
+        module: "标签管理",
+      },
       "taxonomy",
     );
     if (ok && changed) toast(`已重算 ${changed} 份内容`);
+  }
+  function toggleValue(tag: Tag) {
+    if (tag.enabled) {
+      const refRules = state.rules.filter(
+        (r) =>
+          r.enabled &&
+          (r.trigger.valueIds.includes(tag.id) ||
+            r.action.valueIds.includes(tag.id)),
+      );
+      const fallbackDim = state.tags.find(
+        (t) => !t.parentId && t.fallbackId === tag.id,
+      );
+      const hints: string[] = [];
+      if (refRules.length)
+        hints.push(`当前有 ${refRules.length} 条启用规则正在引用该取值`);
+      if (fallbackDim)
+        hints.push(`该取值正作为字段「${fallbackDim.name}」的兜底值`);
+      if (
+        hints.length &&
+        !window.confirm(`${hints.join("；")}。确认停用「${tag.name}」并立即重算当前版本？`)
+      )
+        return;
+    }
+    let changed = 0;
+    const ok = update(
+      (s) => {
+        const target = s.tags.find((t) => t.id === tag.id);
+        if (target) target.enabled = !target.enabled;
+        changed = recalcRules(s);
+      },
+      {
+        action: tag.enabled ? "停用取值" : "启用取值",
+        object: tag.name,
+        category: "标签",
+        module: "标签管理",
+      },
+      "taxonomy",
+    );
+    if (ok)
+      toast(
+        `${tag.enabled ? "已停用" : "已启用"}${changed ? `，重算 ${changed} 份内容` : ""}`,
+      );
   }
 
   return (
@@ -1120,22 +1193,7 @@ export default function Tags() {
                           variant="ghost"
                           disabled={!can("taxonomy")}
                           aria-label={`${tag.enabled ? "停用" : "启用"}取值 ${tag.name}`}
-                          onClick={() =>
-                            update(
-                              (s) => {
-                                const target = s.tags.find(
-                                  (t) => t.id === tag.id,
-                                );
-                                if (target) target.enabled = !target.enabled;
-                              },
-                              {
-                                action: tag.enabled ? "停用取值" : "启用取值",
-                                object: tag.name,
-                                category: "标签",
-                              },
-                              "taxonomy",
-                            )
-                          }
+                          onClick={() => toggleValue(tag)}
                         >
                           {tag.enabled ? "停用" : "启用"}
                         </Button>
@@ -1194,6 +1252,7 @@ export default function Tags() {
                           action: "导入标签",
                           object: `新增 ${transfer.added} 个，更新 ${transfer.updated} 个标签`,
                           category: "标签",
+                          module: "标签管理",
                         },
                         "taxonomy",
                       )
@@ -1391,6 +1450,8 @@ export default function Tags() {
                             ...editor.draft,
                             kind,
                             ai: kind === "enum" ? "none" : "closed",
+                            scope:
+                              kind === "enum" ? "material" : editor.draft.scope,
                             humanEditable: kind === "enum" ? true : undefined,
                           },
                         })
@@ -1398,7 +1459,7 @@ export default function Tags() {
                     />
                     <small className="muted">
                       {editor.draft.kind === "enum"
-                        ? "内容固定属性，不参与 AI。"
+                        ? "内容固定属性，固定不参与 AI 且仅作用于材料级。"
                         : "业务标签，取值可自由增删。"}
                     </small>
                   </Field>
@@ -1413,14 +1474,28 @@ export default function Tags() {
                     onChange={(cardinality) =>
                       setEditor({
                         ...editor,
-                        draft: { ...editor.draft, cardinality },
+                        draft: {
+                          ...editor.draft,
+                          cardinality,
+                          merge:
+                            cardinality === "single"
+                              ? "priority"
+                              : editor.draft.merge,
+                        },
                       })
                     }
                   />
+                  {previous?.cardinality === "multi" &&
+                  editor.draft.cardinality === "single" ? (
+                    <small className="muted">
+                      切换为单值后，存量多值保持现状，下次编辑或重算时按单值规则收敛。
+                    </small>
+                  ) : null}
                 </Field>
                 <Field label="AI 匹配">
                   <Segmented
-                    value={editor.draft.ai || "closed"}
+                    disabled={editor.draft.kind === "enum"}
+                    value={editor.draft.kind === "enum" ? "none" : editor.draft.ai || "closed"}
                     options={[
                       { value: "closed", label: "闭集" },
                       { value: "open", label: "开放" },
@@ -1433,7 +1508,12 @@ export default function Tags() {
                 </Field>
                 <Field label="作用域">
                   <Segmented
-                    value={editor.draft.scope || "material"}
+                    disabled={editor.draft.kind === "enum"}
+                    value={
+                      editor.draft.kind === "enum"
+                        ? "material"
+                        : editor.draft.scope || "material"
+                    }
                     options={[
                       { value: "material", label: "材料级" },
                       { value: "page", label: "页级" },
@@ -1451,7 +1531,12 @@ export default function Tags() {
                   <>
                     <Field label="合并策略">
                       <Segmented
-                        value={editor.draft.merge || "union"}
+                        disabled={editor.draft.cardinality === "single"}
+                        value={
+                          editor.draft.cardinality === "single"
+                            ? "priority"
+                            : editor.draft.merge || "union"
+                        }
                         options={[
                           { value: "union", label: "并集" },
                           { value: "priority", label: "优先级" },

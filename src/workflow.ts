@@ -382,7 +382,14 @@ function upgradeTagModel(s: State) {
     delete legacyTag.legacyNames;
     delete legacyTag.valuePolicy;
     delete legacyTag.fillMode;
-    if (!t.parentId) t.enabled = true;
+    if (!t.parentId) {
+      t.enabled = true;
+      if (t.kind === "enum") {
+        t.ai = "none";
+        t.scope = "material";
+      }
+      if (t.cardinality === "single") t.merge = "priority";
+    }
   }
   for (const rule of s.rules || []) {
     const legacyRule = rule as Rule & {

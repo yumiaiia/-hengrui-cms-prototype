@@ -12,15 +12,18 @@ import {
   type Approval,
 } from "./model";
 import {
-  aiEligibleTag,
+  aiEligibleTagForScope,
   availableTag,
+  dimensionAllowsScope,
   pendingRecommendationsForVersion,
+  selectableTag,
   suggestionContexts,
 } from "./taxonomy";
 import { normalizeTagName } from "./tagSimilarity";
 import {
   applyRules,
   boundDefinitions,
+  dimensionOf,
   enforceSingleValue,
   excludeTag,
   exclusionMatches,
@@ -202,6 +205,37 @@ export function reviewProblems(
     )
   )
     problems.push("标签页码无效");
+  for (const b of v.tags) {
+    const tag = s.tags.find((t) => t.id === b.tagId);
+    const dim = tag?.parentId
+      ? s.tags.find((t) => t.id === tag.parentId && t.parentId === null)
+      : undefined;
+    if (dim?.kind === "enum") {
+      problems.push("枚举字段不能作为标签绑定，请在字段区维护");
+      break;
+    }
+    if (b.origin === "规则" && b.page !== undefined) {
+      problems.push("规则产物仅允许位于材料级");
+      break;
+    }
+    if (dim && !dimensionAllowsScope(s.tags, dim.id, b.page)) {
+      problems.push("存在与维度作用域不匹配的标签绑定");
+      break;
+    }
+  }
+  const singleSeen = new Set<string>();
+  for (const b of v.tags) {
+    const dim = dimensionOf(b, s.tags);
+    const dimTag = dim ? s.tags.find((t) => t.id === dim) : undefined;
+    if (dimTag?.cardinality === "single") {
+      const key = `${dim}:${b.page ?? "m"}`;
+      if (singleSeen.has(key)) {
+        problems.push("单值维度同一位置仅允许保留一个取值");
+        break;
+      }
+      singleSeen.add(key);
+    }
+  }
   if (batch?.kind === "tags") {
     const asset = s.assets.find((a) => a.id === item.targetId);
     if (
@@ -243,7 +277,14 @@ export function patchStaged(
   patch: Partial<
     Pick<
       Version,
-      "title" | "summary" | "tags" | "cover" | "thumbnail" | "videos"
+      | "title"
+      | "summary"
+      | "tags"
+      | "fields"
+      | "fieldsManual"
+      | "cover"
+      | "thumbnail"
+      | "videos"
     >
   >,
   flags: Partial<
@@ -255,13 +296,18 @@ export function patchStaged(
     "title",
     "summary",
     "tags",
+    "fields",
+    "fieldsManual",
     "cover",
     "thumbnail",
     "videos",
   ]);
   if (Object.keys(patch).some((key) => !allowed.has(key)))
     throw new Error("提交后不能更换源文件或修改审批信息。");
-  if (batch.kind === "tags" && Object.keys(patch).some((key) => key !== "tags"))
+  if (
+    batch.kind === "tags" &&
+    Object.keys(patch).some((key) => !["tags", "fields", "fieldsManual"].includes(key))
+  )
     throw new Error("标签更新仅允许维护标签，内容信息保持原样。");
   if (["处理中", "排队中"].includes(item.v.process))
     throw new Error("文件正在解析打标，请等待完成后核对结果。");
@@ -272,20 +318,36 @@ export function patchStaged(
     )
   )
     return;
-  const { tags, ...metadata } = patch;
+  const { tags, fields, fieldsManual, ...metadata } = patch;
+  const activeRules =
+    batch.kind === "tags" && batch.ruleSnapshot ? batch.ruleSnapshot : s.rules;
+  if (fields !== undefined) item.v.fields = structuredClone(fields);
+  if (fieldsManual !== undefined)
+    item.v.fieldsManual = structuredClone(fieldsManual);
   if (tags) {
-    for (const b of tags) {
-      if (
-        item.v.tags.some((old) => old.tagId === b.tagId && old.page === b.page)
-      )
-        continue;
+    let normalized = tags;
+    const added = tags.filter(
+      (b) =>
+        !item.v.tags.some((old) => old.tagId === b.tagId && old.page === b.page),
+    );
+    for (const b of added) {
       const tag = s.tags.find((t) => t.id === b.tagId);
-      if (!tag?.parentId || !availableTag(s.tags, tag))
-        throw new Error("只能添加已启用标签。");
+      if (!tag?.parentId || !selectableTag(s.tags, tag, b.page))
+        throw new Error("只能添加已启用的可用标签。");
+      const dim = s.tags.find((t) => t.id === tag.parentId);
+      if (dim?.cardinality === "single") {
+        normalized = normalized.filter(
+          (x) =>
+            (x.tagId === b.tagId && x.page === b.page) ||
+            x.page !== b.page ||
+            dimensionOf(x, s.tags) !== dim.id,
+        );
+      }
     }
-    maintainBindings(item.v, tags, s.tags);
-    applyRules(item.v, s.tags, s.rules);
+    maintainBindings(item.v, normalized, s.tags);
   }
+  if (tags || fields !== undefined || fieldsManual !== undefined)
+    applyRules(item.v, s.tags, activeRules);
   Object.assign(item.v, structuredClone(metadata));
   Object.assign(item, flags);
   if (patch.tags?.length) item.noApplicableTags = false;
@@ -298,7 +360,7 @@ export function resolveStagedRecommendation(
   recommendationId: string,
   tagId?: string,
 ) {
-  const { item } = editable(s, batchId, itemId);
+  const { item, batch } = editable(s, batchId, itemId);
   if (item.v.process !== "完成")
     throw new Error("请等待匹配或解析完成后处理推荐。");
   const recommendation = item.recommendations?.find(
@@ -311,21 +373,34 @@ export function resolveStagedRecommendation(
       (t) =>
         t.id === tagId &&
         t.parentId === recommendation.parentId &&
-        availableTag(s.tags, t),
+        selectableTag(s.tags, t, recommendation.page),
     );
-    if (!tag) throw new Error("请选择同分类且已启用的标签。");
+    if (!tag) throw new Error("请选择同维度且已启用的可用标签。");
+    const dim = s.tags.find((t) => t.id === tag.parentId);
+    let nextTags = [...item.v.tags];
+    if (dim?.cardinality === "single")
+      nextTags = nextTags.filter(
+        (b) =>
+          b.page !== recommendation.page ||
+          dimensionOf(b, s.tags) !== dim.id,
+      );
     if (
-      !item.v.tags.some(
+      !nextTags.some(
         (b) => b.tagId === tagId && b.page === recommendation.page,
       )
     )
-      item.v.tags.push({ tagId, origin: "人工", page: recommendation.page });
+      nextTags.push({ tagId, origin: "人工", page: recommendation.page });
+    maintainBindings(item.v, nextTags, s.tags);
+    applyRules(
+      item.v,
+      s.tags,
+      batch.kind === "tags" && batch.ruleSnapshot ? batch.ruleSnapshot : s.rules,
+    );
   }
   recommendation.resolved = true;
   recommendation.resolvedTagId = tagId;
   recommendation.cancelled = !tagId;
   if (!tagId) excludeTag(item.v, recommendation, recommendation.page);
-  else item.v.tags = item.v.tags.map((b) => stampBinding(b, s.tags));
   invalidate(item);
 }
 export function restoreStagedRecommendation(
@@ -419,7 +494,10 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
       // 命中条件：标签名 ∪ 别名（如产品通用名）任一词命中正文。
       const ai = s.tags
         .filter(
-          (t) => t.parentId && aiEligibleTag(s.tags, t) && tagHitsText(t, text),
+          (t) =>
+            t.parentId &&
+            aiEligibleTagForScope(s.tags, t, undefined) &&
+            tagHitsText(t, text),
         )
         .map((t) => ({ tagId: t.id, origin: "AI" as const }));
       item.v.tags = [
@@ -435,7 +513,10 @@ export function advanceUploads(s: State, time = Date.now(), batchId?: string) {
         const body = item.v.content[page - 1]?.normalize("NFKC").toLowerCase();
         if (!body) continue;
         for (const tag of s.tags.filter(
-          (t) => t.parentId && aiEligibleTag(s.tags, t) && tagHitsText(t, body),
+          (t) =>
+            t.parentId &&
+            aiEligibleTagForScope(s.tags, t, page) &&
+            tagHitsText(t, body),
         ))
           if (!item.v.tags.some((b) => b.tagId === tag.id && b.page === page))
             item.v.tags.push({ tagId: tag.id, origin: "AI", page });

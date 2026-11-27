@@ -383,9 +383,13 @@ export function previewTagImport(
           tags.find((t) => t.id === spec.actionDimension);
         if (!triggerDimension) throw new Error("触发维度不存在");
         if (!actionDimension) throw new Error("目标维度不存在");
+        if (triggerDimension.id === actionDimension.id)
+          throw new Error("触发维度与目标维度不能相同");
         const triggerValues = spec.triggerValues.map((name) => {
           const value = valueByName(triggerDimension.id, name);
           if (!value) throw new Error(`触发取值不存在：${name}`);
+          if (value.derivedOnly)
+            throw new Error(`仅规则产生的取值不能作为触发条件：${name}`);
           return value.id;
         });
         const actionValues = spec.actionValues.map((name) => {
@@ -395,6 +399,8 @@ export function previewTagImport(
         });
         if (!triggerValues.length) throw new Error("至少一个触发取值");
         if (!actionValues.length) throw new Error("至少一个结果取值");
+        if (actionDimension.cardinality === "single" && actionValues.length > 1)
+          throw new Error("单值目标维度每条规则仅能选择一个结果取值");
         const old = row.id
           ? rules.find((r) => r.id === row.id)
           : rules.find((r) => r.name === row.name);
@@ -462,6 +468,26 @@ export function previewTagImport(
         throw new Error("不能改变维度与取值的层级");
       if (isDimension && old && old.kind && row.kind && old.kind !== row.kind)
         throw new Error("维度类型创建后不可修改");
+      const effectiveKind =
+        (isDimension ? row.kind || old?.kind : undefined) || "taxonomy";
+      const effectiveCardinality =
+        (isDimension ? row.cardinality || old?.cardinality : undefined) ||
+        "multi";
+      if (isDimension && effectiveKind === "enum" && row.ai && row.ai !== "none")
+        throw new Error("枚举字段不支持 AI 匹配，请设为不参与");
+      if (
+        isDimension &&
+        effectiveKind === "enum" &&
+        row.scope &&
+        row.scope !== "material"
+      )
+        throw new Error("枚举字段作用域仅支持材料级");
+      if (
+        isDimension &&
+        effectiveCardinality === "single" &&
+        row.merge === "union"
+      )
+        throw new Error("单值维度合并策略仅支持优先级");
       const fallback = row.fallback
         ? valueByName(parent?.id || old?.id, row.fallback) ||
           tags.find((t) => t.id === row.fallback)
@@ -480,11 +506,15 @@ export function previewTagImport(
             : undefined,
         ...(isDimension
           ? {
-              kind: row.kind || "taxonomy",
-              cardinality: row.cardinality || "multi",
-              scope: row.scope || "material",
-              ai: row.ai || "closed",
-              merge: row.merge || "union",
+              kind: effectiveKind,
+              cardinality: effectiveCardinality,
+              scope:
+                effectiveKind === "enum" ? "material" : row.scope || "material",
+              ai: effectiveKind === "enum" ? "none" : row.ai || "closed",
+              merge:
+                effectiveCardinality === "single"
+                  ? "priority"
+                  : row.merge || "union",
               fallbackId: fallback?.id,
               humanEditable: row.humanEditable,
             }
@@ -512,6 +542,12 @@ export function previewTagImport(
         ["name", "parentId", "enabled", "external", "kind", "cardinality", "ai"].every(
           (key) => old[key as keyof Tag] === tag[key as keyof Tag],
         ) &&
+        (old.scope || "material") === (tag.scope || "material") &&
+        (old.merge || "union") === (tag.merge || "union") &&
+        old.fallbackId === tag.fallbackId &&
+        !!old.humanEditable === !!tag.humanEditable &&
+        !!old.derivedOnly === !!tag.derivedOnly &&
+        old.order === tag.order &&
         JSON.stringify(old.aliases || []) === JSON.stringify(tag.aliases || []);
       const action = !old ? "新增" : same ? "无变化" : "更新";
       const similar =

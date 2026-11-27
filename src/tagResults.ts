@@ -251,14 +251,30 @@ export function applyRules(version: Version, tags: Tag[], rules: Rule[]) {
     }
     if (humanValue && dimension.humanEditable) continue;
     if (dimension.kind === "enum") {
-      const values = result.valueIds.filter((id) =>
-        tags.some((t) => t.id === id && t.enabled),
-      );
-      if (values.length)
-        next[dimension.id] = [...new Set(values)].slice(
+      const values = result.valueIds
+        .map((id) => tags.find((t) => t.id === id && t.enabled))
+        .filter((t): t is Tag => !!t);
+      if (values.length) {
+        const sorted =
+          dimension.cardinality === "single"
+            ? [...values].sort(
+                (a, b) =>
+                  (a.order ?? Number.MAX_SAFE_INTEGER) -
+                    (b.order ?? Number.MAX_SAFE_INTEGER) ||
+                  a.name.localeCompare(b.name, "zh"),
+              )
+            : values;
+        next[dimension.id] = [...new Set(sorted.map((t) => t.id))].slice(
           0,
-          dimension.cardinality === "single" ? 1 : values.length,
+          dimension.cardinality === "single" ? 1 : sorted.length,
         );
+      } else if (
+        !humanValue &&
+        dimension.fallbackId &&
+        tags.some((t) => t.id === dimension.fallbackId && t.enabled)
+      ) {
+        next[dimension.id] = [dimension.fallbackId];
+      }
       continue;
     }
     for (const id of result.valueIds) {

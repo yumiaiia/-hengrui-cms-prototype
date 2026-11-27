@@ -28,17 +28,52 @@ export const availableTag = (tags: Tag[], tag: Tag) =>
         parent.parentId === null &&
         parent.enabled,
     ));
-/** AI 匹配范围由维度决定：ai=不参与 或取值仅由规则产生，都不进入自动打标。 */
+export const dimensionAllowsScope = (
+  tags: Tag[],
+  dimensionId: string,
+  page?: number,
+) => {
+  const dimension = tags.find(
+    (t) => t.id === dimensionId && t.parentId === null,
+  );
+  if (!dimension) return false;
+  if (dimension.kind === "enum") return page === undefined;
+  const scope = dimension.scope;
+  if (!scope || scope === "both") return true;
+  return page === undefined ? scope === "material" : scope === "page";
+};
+export const selectableTag = (tags: Tag[], tag: Tag, page?: number) => {
+  const dimension = tag.parentId
+    ? tags.find((t) => t.id === tag.parentId && t.parentId === null)
+    : undefined;
+  return (
+    !!dimension &&
+    availableTag(tags, tag) &&
+    dimension.kind !== "enum" &&
+    !tag.derivedOnly &&
+    dimensionAllowsScope(tags, dimension.id, page)
+  );
+};
+/** AI 匹配范围由维度决定：枚举字段、ai=不参与或取值仅由规则产生，都不进入自动打标。 */
 export const aiEligibleTag = (tags: Tag[], tag: Tag) => {
   const dimension = tag.parentId
     ? tags.find((t) => t.id === tag.parentId)
     : undefined;
   return (
     availableTag(tags, tag) &&
+    dimension?.kind !== "enum" &&
     (dimension?.ai || "closed") !== "none" &&
     !tag.derivedOnly
   );
 };
+export const aiEligibleTagForScope = (
+  tags: Tag[],
+  tag: Tag,
+  page?: number,
+) =>
+  aiEligibleTag(tags, tag) &&
+  !!tag.parentId &&
+  dimensionAllowsScope(tags, tag.parentId, page);
 export const dimensionOfTag = (tags: Tag[], tag: Tag) =>
   tag.parentId ? tags.find((t) => t.id === tag.parentId) : tag;
 export function validateTag(
@@ -234,9 +269,17 @@ export function bindTag(
   const tag = state.tags.find((t) => t.id === tagId);
   if (!tag?.parentId || !availableTag(state.tags, tag))
     throw new Error("请选择已启用的二级标签");
+  const parent = dimensionOfTag(state.tags, tag);
+  if (parent?.kind === "enum")
+    throw new Error("枚举字段请在字段区维护，不能作为标签绑定");
+  if (tag.derivedOnly)
+    throw new Error("仅由规则产生的取值不支持人工直接添加");
+  if (!parent || !dimensionAllowsScope(state.tags, parent.id, page))
+    throw new Error(
+      page === undefined ? "该维度仅支持页级标签" : "该维度仅支持材料级标签",
+    );
   if (!version.tags.some((b) => b.tagId === tagId && b.page === page)) {
     // 单值维度：人工新绑定的取值替换同位置原有取值（被替换项记入排除记忆）。
-    const parent = dimensionOfTag(state.tags, tag);
     if (parent?.cardinality === "single")
       maintainBindings(
         version,
